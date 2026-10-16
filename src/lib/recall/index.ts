@@ -1,6 +1,6 @@
 export * from "./bot"
 export * from "./calendar"
-export * from "./rules"
+export * from "./scheduling"
 export * from "./schema"
 export * from "./upcoming"
 export * from "./webhook"

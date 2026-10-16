@@ -1,17 +1,17 @@
+import { CircleAlertIcon } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+
 /**
- * Shows the result of the OAuth flow: `connected` is the label (e.g. email) of the calendar that was just
- * connected, and `error` is the ?error=<code> the callback passed back to the home page.
+ * Shows the ?error=<code> the OAuth callback passes back to the home page when connecting a calendar
+ * fails. A successful connection is shown as a toast instead (see ConnectedToast).
  */
-export function StatusBanner({ connected, error }: { connected?: string; error?: string }) {
-    if (connected) {
-        return <p className="rounded-md border border-border bg-secondary p-3 text-sm">Calendar connected: {connected}</p>;
-    }
-    if (error) {
-        return (
-            <p className="rounded-md border border-destructive p-3 text-sm text-destructive">
-                Couldn&apos;t connect calendar: {error}
-            </p>
-        );
-    }
-    return null;
+export function StatusBanner({ error }: { error?: string }) {
+    if (!error) return null;
+    return (
+        <Alert variant="destructive">
+            <CircleAlertIcon />
+            <AlertTitle>Couldn&apos;t connect calendar</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+        </Alert>
+    );
 }

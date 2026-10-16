@@ -158,17 +158,6 @@ export async function listCalendarEvents(filters: {
     return fetchAllPages<CalendarEvent>(withQuery("/api/v2/calendar-events/", filters));
 }
 
-/**
- * Whether Recall has loaded any events for a calendar yet. After a calendar is created, Recall syncs its
- * events in the background (then sends the first calendar.sync_events webhook), so this is briefly false
- * for a newly connected calendar. Only fetches the first page.
- */
-export async function hasCalendarEvents(calendarId: string): Promise<boolean> {
-    const page = await recallFetch<{ results: CalendarEvent[] }>(
-        withQuery("/api/v2/calendar-events/", { calendar_id: calendarId }),
-    );
-    return page.results.length > 0;
-}
 
 /**
  * https://docs.recall.ai/reference/calendar_events_retrieve

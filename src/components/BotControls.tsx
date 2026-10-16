@@ -1,8 +1,11 @@
 "use client";
 
+import { BotIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useState, useTransition } from "react";
-import { DEFAULT_BOT_SETTINGS, type BotSettings } from "../lib/bot-settings";
-import { BotSettingsForm } from "./BotSettingsForm";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import type { BotSettings } from "@/lib/bot-settings";
+import { BotSettingsDialog } from "./BotSettingsDialog";
 
 /**
  * Add, edit or remove the bot for one meeting.
@@ -16,6 +19,7 @@ export function BotControls({
     eventId,
     hasMeetingUrl,
     bot,
+    defaultSettings,
     removeLabel = "Remove",
     saveBotFn,
     removeBotFn,
@@ -23,76 +27,85 @@ export function BotControls({
     eventId: string;
     hasMeetingUrl: boolean;
     bot: BotSettings | null;
-    /** e.g. "Skip this meeting" when removing would otherwise be undone by a recording rule. */
+    /** Where a new bot's settings start from: the meeting's calendar's bot settings. */
+    defaultSettings: BotSettings;
+    /** e.g. "Skip this meeting" when removing would otherwise be undone by the calendar's setting. */
     removeLabel?: string;
 } & BotActions) {
     const [isEditing, setIsEditing] = useState(false);
-    const [isPending, startTransition] = useTransition();
+    const [isSaving, startSaving] = useTransition();
+    const [isRemoving, startRemoving] = useTransition();
     const [error, setError] = useState<string>();
+    const [formError, setFormError] = useState<string>();
 
-    const run = (action: () => Promise<{ error?: string }>, onSuccess?: () => void) => {
-        setError(undefined);
-        startTransition(async () => {
-            const result = await action();
-            if (result.error) setError(result.error);
-            else onSuccess?.();
+    if (!hasMeetingUrl) {
+        return <p className="text-sm text-muted-foreground">This meeting has no meeting link, so a bot can&apos;t join.</p>;
+    }
+
+    const openEditor = () => {
+        setFormError(undefined);
+        setIsEditing(true);
+    };
+
+    const save = (settings: BotSettings) => {
+        setFormError(undefined);
+        startSaving(async () => {
+            const result = await saveBotFn(eventId, settings);
+            if (result.error) setFormError(result.error);
+            else setIsEditing(false);
         });
     };
 
-    if (!hasMeetingUrl) {
-        return <span className="text-xs text-muted-foreground">No meeting link</span>;
-    }
-
-    if (isEditing) {
-        return (
-            <div className="flex w-full flex-col gap-1">
-                <BotSettingsForm
-                    initialSettings={bot ?? DEFAULT_BOT_SETTINGS}
-                    submitLabel={bot ? "Save bot" : "Add bot"}
-                    isPending={isPending}
-                    onSubmit={(settings) => run(() => saveBotFn(eventId, settings), () => setIsEditing(false))}
-                    onCancel={() => setIsEditing(false)}
-                />
-                {error && <span className="text-xs text-destructive">{error}</span>}
-            </div>
-        );
-    }
+    const remove = () => {
+        setError(undefined);
+        startRemoving(async () => {
+            const result = await removeBotFn(eventId);
+            if (result.error) setError(result.error);
+        });
+    };
 
     return (
-        <div className="flex flex-col items-start gap-1">
+        <div className="flex flex-col items-start gap-2">
             {bot ? (
-                <div className="flex items-center gap-2">
-                    <span className="rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
+                <div className="flex flex-wrap items-center gap-2">
+                    <Badge>
+                        <BotIcon />
                         {bot.botName}
                         {bot.joinMinutesEarly > 0 && ` · ${bot.joinMinutesEarly} min early`}
-                    </span>
-                    <button
-                        type="button"
-                        onClick={() => setIsEditing(true)}
-                        disabled={isPending}
-                        className="rounded-md border border-border px-3 py-1 text-xs font-medium hover:bg-secondary disabled:opacity-50"
-                    >
+                    </Badge>
+                    <Button variant="outline" size="sm" onClick={openEditor} disabled={isRemoving}>
+                        <PencilIcon />
                         Edit
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => run(() => removeBotFn(eventId))}
-                        disabled={isPending}
-                        className="rounded-md border border-destructive px-3 py-1 text-xs font-medium text-destructive hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
-                    >
-                        {isPending ? "Removing…" : removeLabel}
-                    </button>
+                    </Button>
+                    <Button variant="destructive" size="sm" onClick={remove} disabled={isRemoving}>
+                        <Trash2Icon />
+                        {isRemoving ? "Removing…" : removeLabel}
+                    </Button>
                 </div>
             ) : (
-                <button
-                    type="button"
-                    onClick={() => setIsEditing(true)}
-                    className="rounded-md border border-border px-3 py-1 text-xs font-medium hover:bg-secondary"
-                >
+                <Button size="sm" onClick={openEditor}>
+                    <PlusIcon />
                     Add bot
-                </button>
+                </Button>
             )}
-            {error && <span className="text-xs text-destructive">{error}</span>}
+            {error && <p className="text-sm text-destructive">{error}</p>}
+
+            <BotSettingsDialog
+                open={isEditing}
+                onOpenChange={setIsEditing}
+                title={bot ? "Edit this meeting's bot" : "Add a bot to this meeting"}
+                description={
+                    bot
+                        ? "Changes apply to this meeting only."
+                        : "Starts from this calendar's bot settings. The meeting will always get a bot, whatever the calendar's setting."
+                }
+                initialSettings={bot ?? defaultSettings}
+                submitLabel={bot ? "Save bot" : "Add bot"}
+                requireChanges={!!bot}
+                isPending={isSaving}
+                error={formError}
+                onSubmit={save}
+            />
         </div>
     );
 }

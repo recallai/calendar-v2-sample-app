@@ -1,8 +1,8 @@
-import type { BotSettings } from "../bot-settings";
-import type { BotSource } from "../recording-rules";
+import type { BotSettings } from "@/lib/bot-settings";
+import type { BotSource, MeetingOverride } from "@/lib/schedule-modes";
 import { getBot, getBotSettings, getBotSource, getUpcomingBot } from "./bot";
 import { getCalendarEventTitle, listCalendarEvents, type Calendar, type CalendarEvent } from "./calendar";
-import { getCalendarRules, getRecordingDecision, isRecurringEvent } from "./rules";
+import { getCalendarBotSettings, getDispatchDecision, loadDispatchContexts } from "./scheduling";
 
 export type UpcomingEvent = {
     id: string;
@@ -19,13 +19,14 @@ export type UpcomingEvent = {
     calendarLabel: string;
     /** Settings of the bot scheduled for this meeting, or null if it has no bot. */
     bot: BotSettings | null;
-    /** Whether the bot was added by the calendar's rule, by an always-recorded series, or by hand. */
+    /** The meeting's calendar's bot settings, where a bot added by hand starts from. */
+    calendarBotSettings: BotSettings;
+    /** Whether the bot was added by the calendar's schedule mode or by hand. */
     botSource: BotSource | null;
-    /** Why the calendar's rules do or don't want a bot on this meeting. */
-    ruleReason: string;
-    isRecurring: boolean;
-    /** This meeting's recurring series is set to always record. */
-    seriesRecorded: boolean;
+    /** Why this meeting does or doesn't get a bot, e.g. "This calendar sends bots: Every meeting." */
+    decisionReason: string;
+    /** A per-meeting "always" / "never" choice that beats the calendar's schedule mode. */
+    override: MeetingOverride | null;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -60,9 +61,11 @@ export async function listUpcomingEvents(calendars: Calendar[], days = 7): Promi
     const from = new Date(now.getTime() - DAY_MS);
     const until = new Date(now.getTime() + (days + 1) * DAY_MS);
 
+    const connected = calendars.filter((calendar) => calendar.status === "connected");
+    const contexts = await loadDispatchContexts(connected);
+
     const perCalendar = await Promise.all(
-        calendars
-            .filter((calendar) => calendar.status === "connected")
+        connected
             .map(async (calendar) => {
                 const events = await listCalendarEvents({
                     calendar_id: calendar.id,
@@ -82,7 +85,7 @@ export async function listUpcomingEvents(calendars: Calendar[], days = 7): Promi
         perCalendar.flat().map(async ({ event, calendar, calendarLabel }): Promise<UpcomingEvent> => {
             const scheduledBot = getUpcomingBot(event, now);
             const bot = scheduledBot ? await getBot(scheduledBot.bot_id) : null;
-            const rules = getCalendarRules(calendar);
+            const context = contexts.get(calendar.id)!;
             const allDay = getAllDayRange(event);
             return {
                 id: event.id,
@@ -97,10 +100,10 @@ export async function listUpcomingEvents(calendars: Calendar[], days = 7): Promi
                 calendarId: event.calendar_id,
                 calendarLabel,
                 bot: bot ? getBotSettings(bot) : null,
+                calendarBotSettings: getCalendarBotSettings(context.settings),
                 botSource: bot ? getBotSource(bot) : null,
-                ruleReason: getRecordingDecision(event, calendar, rules).reason,
-                isRecurring: isRecurringEvent(event),
-                seriesRecorded: rules.recordedSeries.has(event.ical_uid),
+                decisionReason: getDispatchDecision(event, context).reason,
+                override: context.overrides.get(event.id) ?? null,
             };
         }),
     );

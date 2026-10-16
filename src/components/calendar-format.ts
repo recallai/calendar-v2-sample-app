@@ -45,3 +45,13 @@ export function startOfDay(date: Date): Date {
 export function addDays(date: Date, days: number): Date {
     return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
 }
+
+const CALENDAR_PLATFORM_LABELS: Record<string, string> = {
+    google_calendar: "Google Calendar",
+    microsoft_outlook: "Microsoft Outlook",
+};
+
+/** e.g. "google_calendar" -> "Google Calendar" */
+export function getCalendarPlatformLabel(platform: string): string {
+    return CALENDAR_PLATFORM_LABELS[platform] ?? platform;
+}

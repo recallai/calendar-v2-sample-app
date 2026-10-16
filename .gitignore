@@ -4,3 +4,6 @@ next-env.d.ts
 .env.local
 .env
 node_modules
+
+# Local SQLite database
+data/

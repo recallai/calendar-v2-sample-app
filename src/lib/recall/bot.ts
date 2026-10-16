@@ -1,5 +1,5 @@
-import { DEFAULT_BOT_SETTINGS, type BotSettings } from "../bot-settings";
-import type { BotSource } from "../recording-rules";
+import { DEFAULT_BOT_SETTINGS, type BotSettings } from "@/lib/bot-settings";
+import type { BotSource } from "@/lib/schedule-modes";
 import { scheduleBotForCalendarEvent, type CalendarEvent, type CalendarEventBot } from "./calendar";
 import { recallFetch } from "./client";
 
@@ -14,6 +14,12 @@ export type Bot = {
     bot_name?: string;
     join_at: string;
     chat?: { on_bot_join?: { send_to?: string; message?: string } } | null;
+    automatic_leave?: {
+        waiting_room_timeout?: number;
+        noone_joined_timeout?: number;
+        /** Recall returns a number of seconds; the docs also describe an object form. */
+        everyone_left_timeout?: number | { timeout?: number; activate_after?: number | null } | null;
+    } | null;
     metadata?: Record<string, string>;
 };
 
@@ -37,8 +43,10 @@ export function getDeduplicationKey(event: Pick<CalendarEvent, "start_time" | "m
  * doesn't support partial updates, so this is always the complete config.
  * - `join_at` is only set when joining early; otherwise Recall uses the event's start time.
  * - `metadata.join_minutes_early` remembers the offset so it survives the meeting being moved.
- * - `metadata.scheduled_by` records whether a recording rule, a recorded series or the user added the bot.
- * https://docs.recall.ai/reference/bot_create, https://docs.recall.ai/docs/sending-chat-messages
+ * - `automatic_leave` sets when the bot gives up or leaves on its own.
+ * - `metadata.scheduled_by` records whether the calendar's schedule mode or the user added the bot.
+ * https://docs.recall.ai/reference/bot_create, https://docs.recall.ai/docs/sending-chat-messages,
+ * https://docs.recall.ai/docs/automatic-leaving-behavior
  */
 export function buildBotConfig(event: Pick<CalendarEvent, "start_time">, settings: BotSettings, source: BotSource) {
     const joinAt =
@@ -50,8 +58,20 @@ export function buildBotConfig(event: Pick<CalendarEvent, "start_time">, setting
         bot_name: settings.botName,
         ...(joinAt ? { join_at: joinAt } : {}),
         ...(settings.chatMessage ? { chat: { on_bot_join: { send_to: "everyone", message: settings.chatMessage } } } : {}),
+        automatic_leave: {
+            waiting_room_timeout: settings.waitingRoomTimeout,
+            noone_joined_timeout: settings.nooneJoinedTimeout,
+            // A plain number of seconds. The object form's `activate_after` must be at least 1, so 0 (the
+            // documented default) is rejected; the number form leaves it at Recall's default.
+            everyone_left_timeout: settings.everyoneLeftTimeout,
+        },
         metadata: { join_minutes_early: String(settings.joinMinutesEarly), scheduled_by: source },
     };
+}
+
+function getEveryoneLeftTimeout(bot: Bot): number | undefined {
+    const value = bot.automatic_leave?.everyone_left_timeout;
+    return typeof value === "number" ? value : (value?.timeout ?? undefined);
 }
 
 /**
@@ -63,15 +83,19 @@ export function getBotSettings(bot: Bot): BotSettings {
         botName: bot.bot_name ?? DEFAULT_BOT_SETTINGS.botName,
         joinMinutesEarly: Number.isFinite(joinMinutesEarly) ? joinMinutesEarly : DEFAULT_BOT_SETTINGS.joinMinutesEarly,
         chatMessage: bot.chat?.on_bot_join?.message ?? "",
+        waitingRoomTimeout: bot.automatic_leave?.waiting_room_timeout ?? DEFAULT_BOT_SETTINGS.waitingRoomTimeout,
+        nooneJoinedTimeout: bot.automatic_leave?.noone_joined_timeout ?? DEFAULT_BOT_SETTINGS.nooneJoinedTimeout,
+        everyoneLeftTimeout: getEveryoneLeftTimeout(bot) ?? DEFAULT_BOT_SETTINGS.everyoneLeftTimeout,
     };
 }
 
 /**
- * Who added a bot. Bots created before rules existed have no `scheduled_by`, so they count as manual.
+ * Who added a bot. Bots created before schedule modes existed have no `scheduled_by`, so they count as
+ * manual. ("rule" and "series" both mean the app added it automatically.)
  */
 export function getBotSource(bot: Bot): BotSource {
     const source = bot.metadata?.scheduled_by;
-    return source === "rule" || source === "series" ? source : "manual";
+    return source === "rule" || source === "series" ? "rule" : "manual";
 }
 
 /**

@@ -1,3 +1,5 @@
+import { CalendarPlusIcon } from "lucide-react";
+import { buttonVariants } from "@/components/ui/button";
 import { getMicrosoftConfig, isMicrosoftConfigured } from "../lib/oauth/microsoft";
 
 /**
@@ -12,10 +14,8 @@ export function ConnectMicrosoftButton() {
     const href = new URL("/api/auth/sign-in/microsoft", getMicrosoftConfig().redirectUri).toString();
 
     return (
-        <a
-            href={href}
-            className="w-fit rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
-        >
+        <a href={href} className={buttonVariants()}>
+            <CalendarPlusIcon />
             Connect Microsoft Outlook
         </a>
     );

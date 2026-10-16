@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
-import { connectCalendar } from "../../../../../lib/recall";
-import { exchangeGoogleCode, getGoogleConfig, isGoogleConfigured } from "../../../../../lib/oauth/google";
-import { readCallback, redirectHome } from "../../../../../lib/oauth/state";
+import { upsertCalendar } from "@/db/queries";
+import { connectCalendar } from "@/lib/recall";
+import { exchangeGoogleCode, getGoogleConfig, isGoogleConfigured } from "@/lib/oauth/google";
+import { readCallback, redirectHome } from "@/lib/oauth/state";
 
 /**
  * GET /api/auth/callback/google
@@ -29,6 +30,7 @@ export async function GET(request: NextRequest) {
             clientSecret,
             refreshToken,
         });
+        await upsertCalendar(calendar);
         console.log(`Google calendar ${reconnected ? "reconnected" : "connected"}: calendar_id=${calendar.id}`);
         return redirectHome(redirectUri, { connected: calendar.id });
     } catch (error) {

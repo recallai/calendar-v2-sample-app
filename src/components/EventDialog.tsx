@@ -1,19 +1,27 @@
 "use client";
 
-import { useEffect } from "react";
-import type { UpcomingEvent } from "../lib/recall";
+import { ExternalLinkIcon, ZapIcon } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
+import type { UpcomingEvent } from "@/lib/recall";
 import { BotControls, type BotActions } from "./BotControls";
 import { formatDay, formatTimeRange, getPlatformLabel } from "./calendar-format";
-import { SeriesRecordingToggle, type SetSeriesRecordingFn } from "./SeriesRecordingToggle";
+import { UseCalendarRulesButton, type ResetToRulesFn } from "./UseCalendarRulesButton";
 
 const BOT_SOURCE_LABELS = {
-    rule: "⚡ Added automatically by this calendar's recording rule",
-    series: "⚡ Added automatically because this series always records",
+    rule: "Sent automatically by this calendar's setting",
     manual: "Added by hand",
 } as const;
 
+const OVERRIDE_LABELS = {
+    dispatch: "Always send a bot to this meeting",
+    skip: "Never send a bot to this meeting",
+} as const;
+
 /**
- * Details for one meeting, with controls to add, edit or remove its bot. Closes on Escape or backdrop click.
+ * Details for one meeting, with controls to add, edit or remove its bot.
  */
 export function EventDialog({
     event,
@@ -21,101 +29,80 @@ export function EventDialog({
     onClose,
     saveBotFn,
     removeBotFn,
-    setSeriesRecordingFn,
+    resetToRulesFn,
 }: {
     event: UpcomingEvent;
     now: Date;
     onClose: () => void;
-    setSeriesRecordingFn: SetSeriesRecordingFn;
+    resetToRulesFn: ResetToRulesFn;
 } & BotActions) {
-    useEffect(() => {
-        const onKeyDown = (keyEvent: KeyboardEvent) => keyEvent.key === "Escape" && onClose();
-        window.addEventListener("keydown", onKeyDown);
-        return () => window.removeEventListener("keydown", onKeyDown);
-    }, [onClose]);
-
     const start = new Date(event.start_time);
     const end = new Date(event.end_time);
     const hasStarted = start <= now;
 
     return (
-        <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-            onClick={(clickEvent) => clickEvent.target === clickEvent.currentTarget && onClose()}
-        >
-            <div
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="event-dialog-title"
-                className="flex w-full max-w-md flex-col gap-4 rounded-lg border border-border bg-background p-5 shadow-lg"
-            >
-                <div className="flex items-start justify-between gap-3">
-                    <div className="flex min-w-0 flex-col gap-1">
-                        <h3 id="event-dialog-title" className="text-base font-semibold">
-                            {event.title}
-                        </h3>
-                        <p className="text-sm text-muted-foreground">
-                            {formatDay(start)}
-                            {!event.isAllDay && ` · ${formatTimeRange(start, end)}`}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                            {event.meeting_platform ? `${getPlatformLabel(event.meeting_platform)} · ` : ""}
-                            {event.calendarLabel}
-                        </p>
+        <Dialog open onOpenChange={(open) => !open && onClose()}>
+            <DialogContent className="sm:max-w-xl">
+                <DialogHeader>
+                    <DialogTitle className="pr-8">{event.title}</DialogTitle>
+                    <DialogDescription>
+                        {formatDay(start)}
+                        {!event.isAllDay && ` · ${formatTimeRange(start, end)}`}
+                    </DialogDescription>
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                        {event.meeting_platform && <Badge variant="secondary">{getPlatformLabel(event.meeting_platform)}</Badge>}
+                        <Badge variant="outline">{event.calendarLabel}</Badge>
+                        {event.meeting_url && (
+                            <a
+                                href={event.meeting_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className={buttonVariants({ variant: "link", size: "xs", className: "px-0" })}
+                            >
+                                Open meeting link
+                                <ExternalLinkIcon />
+                            </a>
+                        )}
                     </div>
-                    <button
-                        type="button"
-                        onClick={onClose}
-                        aria-label="Close"
-                        className="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-secondary"
-                    >
-                        ✕
-                    </button>
-                </div>
-
-                {event.meeting_url && (
-                    <a
-                        href={event.meeting_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="w-fit text-sm text-primary underline underline-offset-2"
-                    >
-                        Open meeting link
-                    </a>
-                )}
+                </DialogHeader>
 
                 {/* Calendar V2: the app, not Recall, decides which meetings get a bot. */}
-                <div className="flex flex-col gap-2 rounded-md bg-secondary p-3 text-xs">
-                    <span className="font-medium uppercase tracking-wide text-muted-foreground">Recording decision</span>
-                    {event.botSource && <span className="font-medium">{BOT_SOURCE_LABELS[event.botSource]}</span>}
-                    <span className="text-muted-foreground">{event.ruleReason}</span>
-                    {event.isRecurring && !hasStarted && event.meeting_url && (
-                        <SeriesRecordingToggle
-                            eventId={event.id}
-                            enabled={event.seriesRecorded}
-                            setSeriesRecordingFn={setSeriesRecordingFn}
-                        />
+                <div className="flex flex-col gap-2 rounded-lg border bg-muted/40 p-3">
+                    <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Dispatch decision</span>
+                    {event.botSource && (
+                        <span className="flex items-center gap-1.5 text-sm font-medium">
+                            {event.botSource === "rule" && <ZapIcon className="size-4 text-amber-500" />}
+                            {BOT_SOURCE_LABELS[event.botSource]}
+                        </span>
+                    )}
+                    <span className="text-sm text-muted-foreground">{event.decisionReason}</span>
+                    {event.override && !hasStarted && (
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                            <Badge variant="outline">{OVERRIDE_LABELS[event.override]}</Badge>
+                            <UseCalendarRulesButton eventId={event.id} resetToRulesFn={resetToRulesFn} />
+                        </div>
                     )}
                 </div>
 
-                <div className="border-t border-border pt-4">
-                    {hasStarted ? (
-                        <p className="text-sm text-muted-foreground">
-                            {end <= now ? "This meeting has ended." : "This meeting has already started."}
-                            {event.bot && ` Bot: ${event.bot.botName}.`}
-                        </p>
-                    ) : (
-                        <BotControls
-                            eventId={event.id}
-                            hasMeetingUrl={!!event.meeting_url}
-                            bot={event.bot}
-                            removeLabel={event.botSource && event.botSource !== "manual" ? "Skip this meeting" : "Remove"}
-                            saveBotFn={saveBotFn}
-                            removeBotFn={removeBotFn}
-                        />
-                    )}
-                </div>
-            </div>
-        </div>
+                <Separator />
+
+                {hasStarted ? (
+                    <p className="text-sm text-muted-foreground">
+                        {end <= now ? "This meeting has ended." : "This meeting has already started."}
+                        {event.bot && ` Bot: ${event.bot.botName}.`}
+                    </p>
+                ) : (
+                    <BotControls
+                        eventId={event.id}
+                        hasMeetingUrl={!!event.meeting_url}
+                        bot={event.bot}
+                        defaultSettings={event.calendarBotSettings}
+                        removeLabel={event.botSource === "rule" ? "Skip this meeting" : "Remove"}
+                        saveBotFn={saveBotFn}
+                        removeBotFn={removeBotFn}
+                    />
+                )}
+            </DialogContent>
+        </Dialog>
     );
 }

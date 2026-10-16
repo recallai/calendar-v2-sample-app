@@ -1,212 +1,117 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { BotSettingsSchema, type BotSettings } from "../lib/bot-settings";
+import { z } from "zod";
+import { BotSettingsSchema, type BotSettings } from "@/lib/bot-settings";
+import type { ReconcileSummary } from "@/lib/recall";
+import { ScheduleModeSchema } from "@/lib/schedule-modes";
 import {
-    applyRulesToUpcomingEvents,
-    deleteBotFromCalendarEvent,
-    deleteCalendar,
-    formatReconcileSummary,
-    getCalendar,
-    getCalendarEvent,
-    getCalendarRules,
-    getRecordingDecision,
-    getUpcomingBot,
-    hasCalendarEvents,
-    listCalendarEvents,
-    reconcileEvents,
-    saveCalendarRules,
-    scheduleBot,
-    type ReconcileSummary,
-} from "../lib/recall";
-import { isRecordingRule, type RecordingRule } from "../lib/recording-rules";
+    addOrUpdateMeetingBot,
+    deleteCalendarAndState,
+    removeMeetingBot,
+    resetMeetingToRules,
+    ServiceError,
+    updateCalendarSettings,
+    type CalendarSettings,
+} from "@/lib/services";
+
+/**
+ * Server actions called from the UI. Each one only validates its input and calls a service in
+ * `@/lib/services`, which holds the business logic.
+ */
 
 export type ActionResult = { error?: string };
-export type RulesActionResult = ActionResult & { summary?: ReconcileSummary };
+/** `summary` is set when the schedule mode changed and was applied to upcoming meetings. */
+export type CalendarSettingsResult = ActionResult & { summary?: ReconcileSummary };
 export type RemoveCalendarResult = ActionResult;
 
+const IdSchema = z.string().min(1);
+const CalendarSettingsSchema = z.object({ scheduleMode: ScheduleModeSchema, botSettings: BotSettingsSchema });
+
 /**
- * Delete (disconnect) a calendar in Recall.ai. Recall immediately unschedules bots for its future meetings,
- * and doesn't send a calendar.update webhook since the delete was initiated by us.
- * https://docs.recall.ai/docs/scheduling-guide#disconnectingdeleting-a-calendar
+ * Validate an action's inputs. Returns the parsed values, or the first validation message.
  */
+function validate<T extends z.ZodTypeAny[]>(
+    ...pairs: { [K in keyof T]: [T[K], unknown] }
+): { data: { [K in keyof T]: z.output<T[K]> } } | { error: string } {
+    const data = [];
+    for (const [schema, value] of pairs) {
+        const result = schema.safeParse(value);
+        if (!result.success) return { error: result.error.issues[0]?.message ?? "Invalid input" };
+        data.push(result.data);
+    }
+    return { data: data as { [K in keyof T]: z.output<T[K]> } };
+}
+
+/**
+ * Run a service, refresh the page, and turn failures into a message for the UI. A ServiceError's
+ * message is shown as-is; anything else is logged and replaced with `failureMessage`.
+ */
+async function run<T extends object>(failureMessage: string, task: () => Promise<T>): Promise<T | { error: string }> {
+    try {
+        const result = await task();
+        revalidatePath("/");
+        return result;
+    } catch (error) {
+        if (error instanceof ServiceError) return { error: error.message };
+        console.error(failureMessage, error instanceof Error ? error.message : error);
+        return { error: failureMessage };
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                  Calendars                                 */
+/* -------------------------------------------------------------------------- */
+
 export async function removeCalendar(id: string): Promise<RemoveCalendarResult> {
-    if (typeof id !== "string" || id.length === 0) {
-        return { error: "Missing calendar id" };
-    }
-
-    try {
-      await deleteCalendar(id);
-    } catch (error) {
-      console.error(`Failed to delete calendar_id=${id}:`, error instanceof Error ? error.message : error);
-      return { error: "Couldn't delete calendar. Try again." };
-    }
-
-    console.log(`Calendar deleted: calendar_id=${id}`);
-    revalidatePath("/");
-    return {};
+    const input = validate([IdSchema, id]);
+    if ("error" in input) return input;
+    return run("Couldn't delete calendar. Try again.", async () => {
+        await deleteCalendarAndState(input.data[0]);
+        return {};
+    });
 }
 
 /**
- * Add a bot to a meeting, or update the existing bot's settings. Scheduling again replaces the previous
- * bot config, so the same call handles both.
- * https://docs.recall.ai/reference/calendar_events_bot_create
+ * Save which of a calendar's meetings automatically get a bot, and what those bots are like. A changed
+ * schedule mode is applied to upcoming meetings right away.
  */
+export async function saveCalendarSettings(calendarId: string, settings: CalendarSettings): Promise<CalendarSettingsResult> {
+    const input = validate([IdSchema, calendarId], [CalendarSettingsSchema, settings]);
+    if ("error" in input) return input;
+    return run("Couldn't save this calendar's settings. Try again.", async () => {
+        const summary = await updateCalendarSettings(...input.data);
+        return summary ? { summary } : {};
+    });
+}
+
+/* -------------------------------------------------------------------------- */
+/*                             Per-meeting overrides                          */
+/* -------------------------------------------------------------------------- */
+
 export async function saveBotForEvent(eventId: string, settings: BotSettings): Promise<ActionResult> {
-    const parsed = BotSettingsSchema.safeParse(settings);
-    if (typeof eventId !== "string" || eventId.length === 0) {
-        return { error: "Missing calendar event id" };
-    }
-    if (!parsed.success) {
-        return { error: parsed.error.issues[0]?.message ?? "Invalid bot settings" };
-    }
-
-    try {
-        // Re-fetch so the bot is scheduled against the event's latest start time and meeting link.
-        const event = await getCalendarEvent(eventId);
-        if (event.is_deleted) return { error: "This meeting was removed from the calendar." };
-        if (!event.meeting_url) return { error: "This meeting doesn't have a meeting link." };
-        if (new Date(event.start_time) <= new Date()) return { error: "This meeting has already started." };
-
-        // Bots added or edited by hand are kept regardless of the calendar's rules.
-        await scheduleBot(event, parsed.data, "manual");
-
-        // If the user had skipped this meeting, adding a bot by hand undoes that.
-        const calendar = await getCalendar(event.calendar_id);
-        const rules = getCalendarRules(calendar);
-        if (rules.skippedEvents.delete(event.id)) {
-            await saveCalendarRules(calendar, rules);
-        }
-    } catch (error) {
-        console.error(`Failed to schedule bot for calendar_event_id=${eventId}:`, error instanceof Error ? error.message : error);
-        return { error: "Couldn't schedule the bot. Try again." };
-    }
-
-    console.log(`Bot saved for calendar_event_id=${eventId}`);
-    revalidatePath("/");
-    return {};
+    const input = validate([IdSchema, eventId], [BotSettingsSchema, settings]);
+    if ("error" in input) return input;
+    return run("Couldn't schedule the bot. Try again.", async () => {
+        await addOrUpdateMeetingBot(...input.data);
+        return {};
+    });
 }
 
-/**
- * Remove the bot from a meeting. If the bot is shared with other calendars' copies of the meeting
- * (deduplication), it still joins for them. If the calendar's rules would add the bot back, the meeting
- * is marked as skipped so they leave it alone.
- * https://docs.recall.ai/reference/calendar_events_bot_destroy
- */
 export async function removeBotFromEvent(eventId: string): Promise<ActionResult> {
-    if (typeof eventId !== "string" || eventId.length === 0) {
-        return { error: "Missing calendar event id" };
-    }
-
-    try {
-        const event = await getCalendarEvent(eventId);
-        if (getUpcomingBot(event)) {
-            await deleteBotFromCalendarEvent(eventId);
-        }
-
-        const calendar = await getCalendar(event.calendar_id);
-        const rules = getCalendarRules(calendar);
-        if (getRecordingDecision(event, calendar, rules).record) {
-            rules.skippedEvents.add(event.id);
-            await saveCalendarRules(calendar, rules);
-        }
-    } catch (error) {
-        console.error(`Failed to remove bot from calendar_event_id=${eventId}:`, error instanceof Error ? error.message : error);
-        return { error: "Couldn't remove the bot. Try again." };
-    }
-
-    console.log(`Bot removed from calendar_event_id=${eventId}`);
-    revalidatePath("/");
-    return {};
+    const input = validate([IdSchema, eventId]);
+    if ("error" in input) return input;
+    return run("Couldn't remove the bot. Try again.", async () => {
+        await removeMeetingBot(input.data[0]);
+        return {};
+    });
 }
 
-/**
- * Whether Recall has finished loading a newly connected calendar's events, so the page knows when to refresh.
- */
-export async function isCalendarSynced(calendarId: string): Promise<boolean> {
-    if (typeof calendarId !== "string" || calendarId.length === 0) {
-        return false;
-    }
-    try {
-        return await hasCalendarEvents(calendarId);
-    } catch (error) {
-        console.error(`Failed to check events for calendar_id=${calendarId}:`, error instanceof Error ? error.message : error);
-        return false;
-    }
-}
-
-/**
- * Change a calendar's recording rule and apply it to its upcoming meetings right away: bots are added
- * to meetings that now match and removed from rule-added meetings that don't. Manually added bots stay.
- * Changing the rule also clears any meetings the user skipped under the previous rule.
- */
-export async function setRecordingRule(calendarId: string, rule: RecordingRule): Promise<RulesActionResult> {
-    if (typeof calendarId !== "string" || calendarId.length === 0) {
-        return { error: "Missing calendar id" };
-    }
-    if (!isRecordingRule(rule)) {
-        return { error: "Unknown recording rule" };
-    }
-
-    try {
-        const calendar = await getCalendar(calendarId);
-        if (calendar.status !== "connected") return { error: "This calendar isn't connected." };
-
-        const rules = getCalendarRules(calendar);
-        rules.rule = rule;
-        rules.skippedEvents.clear();
-        const updated = await saveCalendarRules(calendar, rules);
-        const summary = await applyRulesToUpcomingEvents(updated, rules);
-
-        console.log(`Recording rule set: calendar_id=${calendarId} rule=${rule} ${formatReconcileSummary(summary)}`);
-        revalidatePath("/");
-        return { summary };
-    } catch (error) {
-        console.error(`Failed to set recording rule for calendar_id=${calendarId}:`, error instanceof Error ? error.message : error);
-        return { error: "Couldn't update the recording rule. Try again." };
-    }
-}
-
-/**
- * Turn "always record this series" on or off for a recurring meeting, and apply it to the series'
- * upcoming occurrences. Uses the event's iCalUID, which Recall's scheduling guide suggests for
- * recording all instances of a recurring event.
- * https://docs.recall.ai/docs/scheduling-guide#2-determine-whether-an-event-should-be-recorded
- */
-export async function setSeriesRecording(eventId: string, enabled: boolean): Promise<RulesActionResult> {
-    if (typeof eventId !== "string" || eventId.length === 0) {
-        return { error: "Missing calendar event id" };
-    }
-
-    try {
-        const event = await getCalendarEvent(eventId);
-        const calendar = await getCalendar(event.calendar_id);
-        const rules = getCalendarRules(calendar);
-
-        if (enabled) rules.recordedSeries.add(event.ical_uid);
-        else rules.recordedSeries.delete(event.ical_uid);
-
-        // `ical_uid` filters by prefix, so keep exact matches only.
-        const occurrences = (
-            await listCalendarEvents({
-                calendar_id: calendar.id,
-                ical_uid: event.ical_uid,
-                is_deleted: false,
-                start_time__gte: new Date().toISOString(),
-            })
-        ).filter((occurrence) => occurrence.ical_uid === event.ical_uid);
-
-        // Turning a series on should record every occurrence, including ones skipped before.
-        if (enabled) occurrences.forEach((occurrence) => rules.skippedEvents.delete(occurrence.id));
-
-        const updated = await saveCalendarRules(calendar, rules);
-        const summary = await reconcileEvents(occurrences, updated, rules);
-
-        console.log(`Series recording ${enabled ? "on" : "off"}: calendar_id=${calendar.id} ${formatReconcileSummary(summary)}`);
-        revalidatePath("/");
-        return { summary };
-    } catch (error) {
-        console.error(`Failed to update series recording for calendar_event_id=${eventId}:`, error instanceof Error ? error.message : error);
-        return { error: "Couldn't update this series. Try again." };
-    }
+export async function resetToCalendarSetting(eventId: string): Promise<ActionResult> {
+    const input = validate([IdSchema, eventId]);
+    if ("error" in input) return input;
+    return run("Couldn't apply the calendar's setting. Try again.", async () => {
+        await resetMeetingToRules(input.data[0]);
+        return {};
+    });
 }

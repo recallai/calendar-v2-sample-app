@@ -1,3 +1,5 @@
+import { CalendarPlusIcon } from "lucide-react";
+import { buttonVariants } from "@/components/ui/button";
 import { getGoogleConfig, isGoogleConfigured } from "../lib/oauth/google";
 
 /**
@@ -12,10 +14,8 @@ export function ConnectGoogleButton() {
     const href = new URL("/api/auth/sign-in/google", getGoogleConfig().redirectUri).toString();
 
     return (
-        <a
-            href={href}
-            className="w-fit rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
-        >
+        <a href={href} className={buttonVariants()}>
+            <CalendarPlusIcon />
             Connect Google Calendar
         </a>
     );

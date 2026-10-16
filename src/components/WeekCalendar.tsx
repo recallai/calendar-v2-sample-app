@@ -1,11 +1,14 @@
 "use client";
 
+import { ZapIcon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { UpcomingEvent } from "../lib/recall";
 import type { BotActions } from "./BotControls";
 import { addDays, formatTime, startOfDay, toDateKey } from "./calendar-format";
 import { EventDialog } from "./EventDialog";
-import type { SetSeriesRecordingFn } from "./SeriesRecordingToggle";
+import type { ResetToRulesFn } from "./UseCalendarRulesButton";
 
 const DAYS = 7;
 const HOUR_HEIGHT = 48;
@@ -48,12 +51,13 @@ function layoutDay(events: UpcomingEvent[]): PositionedEvent[] {
 }
 
 function eventClassName(event: UpcomingEvent, hasEnded: boolean): string {
-    const base = "overflow-hidden rounded-md px-1.5 py-0.5 text-left text-xs leading-tight transition hover:brightness-110";
+    const base =
+        "overflow-hidden rounded-md px-1.5 py-0.5 text-left text-xs leading-tight shadow-xs transition hover:shadow-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none";
     const state = event.bot
-        ? "bg-primary text-primary-foreground"
+        ? "bg-primary text-primary-foreground hover:bg-primary/90"
         : event.meeting_url
-          ? "border border-primary bg-background text-foreground"
-          : "border border-dashed border-muted-foreground bg-background text-muted-foreground";
+          ? "border border-primary/40 bg-background text-foreground hover:bg-muted"
+          : "border border-dashed border-muted-foreground/60 bg-background text-muted-foreground hover:bg-muted";
     return `${base} ${state} ${hasEnded ? "opacity-50" : ""}`;
 }
 
@@ -65,8 +69,8 @@ export function WeekCalendar({
     events,
     saveBotFn,
     removeBotFn,
-    setSeriesRecordingFn,
-}: { events: UpcomingEvent[]; setSeriesRecordingFn: SetSeriesRecordingFn } & BotActions) {
+    resetToRulesFn,
+}: { events: UpcomingEvent[]; resetToRulesFn: ResetToRulesFn } & BotActions) {
     const [now, setNow] = useState<Date | null>(null);
     const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -80,15 +84,17 @@ export function WeekCalendar({
         <div className="flex flex-wrap items-end justify-between gap-2">
             <h2 className="text-lg font-semibold">Next 7 days</h2>
             <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1">
-                    <span className="h-3 w-3 rounded-sm bg-primary" /> Bot scheduled
+                <span className="flex items-center gap-1.5">
+                    <span className="size-3 rounded-sm bg-primary" /> Bot scheduled
                 </span>
-                <span className="flex items-center gap-1">⚡ Added by a rule</span>
-                <span className="flex items-center gap-1">
-                    <span className="h-3 w-3 rounded-sm border border-primary" /> No bot
+                <span className="flex items-center gap-1.5">
+                    <ZapIcon className="size-3 text-amber-500" /> Sent by calendar setting
                 </span>
-                <span className="flex items-center gap-1">
-                    <span className="h-3 w-3 rounded-sm border border-dashed border-muted-foreground" /> No meeting link
+                <span className="flex items-center gap-1.5">
+                    <span className="size-3 rounded-sm border border-primary/40" /> No bot
+                </span>
+                <span className="flex items-center gap-1.5">
+                    <span className="size-3 rounded-sm border border-dashed border-muted-foreground/60" /> No meeting link
                 </span>
             </div>
         </div>
@@ -98,7 +104,7 @@ export function WeekCalendar({
         return (
             <section className="flex flex-col gap-3">
                 {heading}
-                <div className="h-96 animate-pulse rounded-md border border-border bg-secondary" />
+                <Skeleton className="h-96 rounded-xl" />
             </section>
         );
     }
@@ -142,7 +148,7 @@ export function WeekCalendar({
     return (
         <section className="flex flex-col gap-3">
             {heading}
-            <div className="overflow-x-auto rounded-md border border-border">
+            <Card className="overflow-x-auto py-0">
                 <div className="min-w-[720px]">
                     {/* Day headers */}
                     <div className="grid grid-cols-[56px_repeat(7,minmax(0,1fr))] border-b border-border">
@@ -180,7 +186,7 @@ export function WeekCalendar({
                                             className={eventClassName(event, false)}
                                         >
                                             <span className="block truncate font-medium">
-                                                    {event.botSource && event.botSource !== "manual" && "⚡ "}
+                                                    {event.botSource === "rule" && <ZapIcon className="mr-0.5 inline size-3 align-[-1px] text-amber-300" />}
                                                     {event.title}
                                                 </span>
                                         </button>
@@ -243,7 +249,7 @@ export function WeekCalendar({
                                                 }}
                                             >
                                                 <span className="block truncate font-medium">
-                                                    {event.botSource && event.botSource !== "manual" && "⚡ "}
+                                                    {event.botSource === "rule" && <ZapIcon className="mr-0.5 inline size-3 align-[-1px] text-amber-300" />}
                                                     {event.title}
                                                 </span>
                                                 {height >= 32 && (
@@ -269,7 +275,7 @@ export function WeekCalendar({
                         })}
                     </div>
                 </div>
-            </div>
+            </Card>
 
             {!hasAnyEvents && <p className="text-sm text-muted-foreground">No meetings in the next 7 days.</p>}
 
@@ -280,7 +286,7 @@ export function WeekCalendar({
                     onClose={() => setSelectedId(null)}
                     saveBotFn={saveBotFn}
                     removeBotFn={removeBotFn}
-                    setSeriesRecordingFn={setSeriesRecordingFn}
+                    resetToRulesFn={resetToRulesFn}
                 />
             )}
         </section>

@@ -64,3 +64,40 @@ OAuth redirects happen in the user's browser, so `localhost` redirect URIs work.
 1. Register an app in Microsoft Entra ([Recall.ai guide](https://docs.recall.ai/docs/calendar-v2-microsoft-outlook)) that supports "Any Entra ID Tenant + Personal Microsoft accounts", with a **Web** redirect URI of `http://localhost:3000/api/auth/callback/microsoft`.
 2. Create a client secret, and add the delegated Microsoft Graph `Calendars.Read` permission.
 3. Set `OUTLOOK_OAUTH_CLIENT_ID`, `OUTLOOK_OAUTH_CLIENT_SECRET` and `OUTLOOK_OAUTH_REDIRECT_URI` (the URI from step 1) in `.env`.
+
+## Local state (Drizzle + SQLite)
+
+The app keeps its own state in a local SQLite database (`data/app.db`, git-ignored) using [Drizzle](https://orm.drizzle.team) and `@libsql/client`. Recall stays the source of truth for calendars and events; the database holds what *this app* decides:
+
+| Table | What it stores |
+| --- | --- |
+| `calendars` | Local copy of each connected calendar, its schedule mode (which meetings get a bot), and the settings for those bots |
+| `event_overrides` | Per-meeting "always" / "never" choices from adding or removing a bot by hand, which beat the schedule mode |
+| `webhook_events` | Every verified webhook, keyed by message ID so redeliveries are processed once |
+| `bot_decisions` | Every bot sent, moved or removed, with the reason and what triggered it |
+
+Migrations live in `./drizzle` and run automatically when the server starts (`src/instrumentation.ts`).
+
+```sh
+npm run db:generate   # after changing src/db/schema.ts
+npm run db:migrate    # apply migrations without starting the server
+npm run db:studio     # browse the database
+```
+
+Set `DATABASE_URL` to use a different file, e.g. `file:./data/other.db`.
+
+### Schedule modes
+
+Each calendar has one setting for which meetings automatically get a bot (Calendar V2's app-managed scheduling):
+
+| Mode | A meeting gets a bot when… |
+| --- | --- |
+| Manually (default) | never; bots are only added by hand |
+| Every meeting | it has a meeting link |
+| When I organized it | you're the organizer |
+| When there are external guests | someone outside your email domain is invited |
+| When there are only internal guests | other people from your domain are invited, and no one from outside it |
+
+Changing the mode applies it to the calendar's upcoming meetings (the next 28 days) straight away; after that, the `calendar.sync_events` webhook applies it as meetings change. Bots added by hand are kept whatever the mode.
+
+Each calendar also has its own bot settings: name, how early to join, a chat message on join, and when the bot leaves on its own (waiting room, nobody joined, everyone left), sent as Create Bot's `automatic_leave`.
