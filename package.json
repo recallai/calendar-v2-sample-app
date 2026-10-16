@@ -1,0 +1,28 @@
+{
+    "name": "calendar_v2_next",
+    "version": "1.0.0",
+    "description": "Connect a calendar and schedule bots for calendar events (Next.js)",
+    "private": true,
+    "scripts": {
+        "dev": "next dev",
+        "build": "next build",
+        "start": "next start",
+        "typecheck": "tsc --noEmit"
+    },
+    "author": "Ben Reilly",
+    "license": "MIT",
+    "dependencies": {
+        "next": "^16.0.0",
+        "react": "^19.2.0",
+        "react-dom": "^19.2.0",
+        "zod": "^3.23.8"
+    },
+    "devDependencies": {
+        "@tailwindcss/postcss": "^4.1.17",
+        "@types/node": "^22.10.1",
+        "@types/react": "^19.2.0",
+        "@types/react-dom": "^19.2.0",
+        "tailwindcss": "^4.1.17",
+        "typescript": "^5.6.3"
+    }
+}
