@@ -1,22 +1,19 @@
 import { BotIcon, CalendarCheckIcon } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import type { BotSettings } from "@/lib/bot-settings";
-import { SCHEDULE_MODES, type ScheduleMode } from "@/lib/schedule-modes";
-
-function formatSeconds(seconds: number): string {
-    return seconds < 60 ? `${seconds} sec` : `${seconds / 60} min`;
-}
+import { Badge } from "@/components/ui/Badge";
+import { SCHEDULE_MODES } from "@/lib/settings";
+import { format_seconds } from "@/lib/utils";
+import type { BotSettingsType, ScheduleModeType } from "@/schemas/CalendarSettingsSchema";
 
 /**
  * How a calendar schedules bots (Calendar V2's app-managed scheduling) and what those bots are like.
- * Edited with EditCalendarSettingsButton in the card's header.
+ * Edited with EditCalendarSettingsButton in the card's footer.
  */
 export function CalendarScheduling({
     scheduleMode,
     botSettings,
 }: {
-    scheduleMode: ScheduleMode;
-    botSettings: BotSettings;
+    scheduleMode: ScheduleModeType;
+    botSettings: BotSettingsType;
 }) {
     return (
         <div className="flex flex-col gap-2">
@@ -35,8 +32,8 @@ export function CalendarScheduling({
                     {botSettings.joinMinutesEarly > 0 ? `Joins ${botSettings.joinMinutesEarly} min early` : "Joins on time"}
                 </Badge>
                 {botSettings.chatMessage && <Badge variant="outline">Chat message</Badge>}
-                <Badge variant="outline">Waiting room {formatSeconds(botSettings.waitingRoomTimeout)}</Badge>
-                <Badge variant="outline">Leaves after {formatSeconds(botSettings.everyoneLeftTimeout)}</Badge>
+                <Badge variant="outline">Waiting room {format_seconds(botSettings.waitingRoomTimeout)}</Badge>
+                <Badge variant="outline">Leaves after {format_seconds(botSettings.everyoneLeftTimeout)}</Badge>
             </div>
         </div>
     );

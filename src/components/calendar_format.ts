@@ -8,7 +8,7 @@ const PLATFORM_LABELS: Record<string, string> = {
 };
 
 /** Readable label for a meeting_platform value, e.g. "google_meet" -> "Google Meet". */
-export function getPlatformLabel(platform: string): string {
+export function get_platform_label(platform: string): string {
     return (
         PLATFORM_LABELS[platform] ??
         platform
@@ -18,31 +18,24 @@ export function getPlatformLabel(platform: string): string {
     );
 }
 
-export function formatTime(date: Date): string {
+export function format_time(date: Date): string {
     return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
-export function formatTimeRange(start: Date, end: Date): string {
-    return `${formatTime(start)} – ${formatTime(end)}`;
+export function format_time_range(start: Date, end: Date): string {
+    return `${format_time(start)} – ${format_time(end)}`;
 }
 
-export function formatDay(date: Date): string {
+export function format_day(date: Date): string {
     return date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 }
 
-/** Local calendar date as YYYY-MM-DD, for comparing against all-day event dates. */
-export function toDateKey(date: Date): string {
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${date.getFullYear()}-${month}-${day}`;
-}
-
 /** Local midnight of the given date. */
-export function startOfDay(date: Date): Date {
+export function start_of_day(date: Date): Date {
     return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
-export function addDays(date: Date, days: number): Date {
+export function add_days(date: Date, days: number): Date {
     return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
 }
 
@@ -52,6 +45,6 @@ const CALENDAR_PLATFORM_LABELS: Record<string, string> = {
 };
 
 /** e.g. "google_calendar" -> "Google Calendar" */
-export function getCalendarPlatformLabel(platform: string): string {
+export function get_calendar_platform_label(platform: string): string {
     return CALENDAR_PLATFORM_LABELS[platform] ?? platform;
 }

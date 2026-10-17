@@ -2,13 +2,13 @@
 
 import { ZapIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Card } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import type { UpcomingEvent } from "../lib/recall";
+import { Card } from "@/components/ui/Card";
+import { Skeleton } from "@/components/ui/Skeleton";
+import type { UpcomingEvent } from "@/lib/scheduling";
 import type { BotActions } from "./BotControls";
-import { addDays, formatTime, startOfDay, toDateKey } from "./calendar-format";
+import { add_days, format_time, start_of_day } from "./calendar_format";
 import { EventDialog } from "./EventDialog";
-import type { ResetToRulesFn } from "./UseCalendarRulesButton";
+import type { FollowScheduleModeFn } from "./FollowScheduleModeButton";
 
 const DAYS = 7;
 const HOUR_HEIGHT = 48;
@@ -56,8 +56,8 @@ function eventClassName(event: UpcomingEvent, hasEnded: boolean): string {
     const state = event.bot
         ? "bg-primary text-primary-foreground hover:bg-primary/90"
         : event.meeting_url
-          ? "border border-primary/40 bg-background text-foreground hover:bg-muted"
-          : "border border-dashed border-muted-foreground/60 bg-background text-muted-foreground hover:bg-muted";
+            ? "border border-primary/40 bg-background text-foreground hover:bg-muted"
+            : "border border-dashed border-muted-foreground/60 bg-background text-muted-foreground hover:bg-muted";
     return `${base} ${state} ${hasEnded ? "opacity-50" : ""}`;
 }
 
@@ -69,8 +69,8 @@ export function WeekCalendar({
     events,
     saveBotFn,
     removeBotFn,
-    resetToRulesFn,
-}: { events: UpcomingEvent[]; resetToRulesFn: ResetToRulesFn } & BotActions) {
+    followScheduleModeFn,
+}: { events: UpcomingEvent[]; followScheduleModeFn: FollowScheduleModeFn } & BotActions) {
     const [now, setNow] = useState<Date | null>(null);
     const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -109,32 +109,25 @@ export function WeekCalendar({
         );
     }
 
-    const today = startOfDay(now);
-    const days = Array.from({ length: DAYS }, (_, index) => addDays(today, index));
+    const today = start_of_day(now);
+    const days = Array.from({ length: DAYS }, (_, index) => add_days(today, index));
 
-    const timed = events.filter((event) => !event.isAllDay);
-    const timedByDay = days.map((day) => {
-        const next = addDays(day, 1);
-        return timed.filter((event) => {
+    const eventsByDay = days.map((day) => {
+        const next = add_days(day, 1);
+        return events.filter((event) => {
             const start = new Date(event.start_time);
             return start >= day && start < next;
         });
-    });
-    const allDayByDay = days.map((day) => {
-        const key = toDateKey(day);
-        return events.filter(
-            (event) => event.isAllDay && event.allDayStart && event.allDayEnd && event.allDayStart <= key && key < event.allDayEnd,
-        );
     });
 
     // Fit the visible hours to this week's meetings.
     let firstHour = DEFAULT_FIRST_HOUR;
     let lastHour = DEFAULT_LAST_HOUR;
-    for (const event of timedByDay.flat()) {
+    for (const event of eventsByDay.flat()) {
         const start = new Date(event.start_time);
         const end = new Date(event.end_time);
         firstHour = Math.min(firstHour, start.getHours());
-        const endsNextDay = startOfDay(end).getTime() !== startOfDay(start).getTime();
+        const endsNextDay = start_of_day(end).getTime() !== start_of_day(start).getTime();
         lastHour = Math.max(lastHour, endsNextDay ? 24 : Math.ceil(end.getHours() + end.getMinutes() / 60));
     }
     const hours = Array.from({ length: lastHour - firstHour }, (_, index) => firstHour + index);
@@ -142,8 +135,7 @@ export function WeekCalendar({
     const minutesToPx = (minutes: number) => (minutes / 60) * HOUR_HEIGHT;
 
     const selected = events.find((event) => event.id === selectedId) ?? null;
-    const hasAnyEvents = timedByDay.some((day) => day.length > 0) || allDayByDay.some((day) => day.length > 0);
-    const hasAllDayEvents = allDayByDay.some((day) => day.length > 0);
+    const hasAnyEvents = eventsByDay.some((day) => day.length > 0);
 
     return (
         <section className="flex flex-col gap-3">
@@ -161,9 +153,8 @@ export function WeekCalendar({
                                         {day.toLocaleDateString(undefined, { weekday: "short" })}
                                     </span>
                                     <span
-                                        className={`flex h-9 w-9 items-center justify-center rounded-full text-lg ${
-                                            isToday ? "bg-primary text-primary-foreground" : ""
-                                        }`}
+                                        className={`flex h-9 w-9 items-center justify-center rounded-full text-lg ${isToday ? "bg-primary text-primary-foreground" : ""
+                                            }`}
                                     >
                                         {day.getDate()}
                                     </span>
@@ -171,30 +162,6 @@ export function WeekCalendar({
                             );
                         })}
                     </div>
-
-                    {/* All-day events */}
-                    {hasAllDayEvents && (
-                        <div className="grid grid-cols-[56px_repeat(7,minmax(0,1fr))] border-b border-border">
-                            <div className="py-1 pr-2 text-right text-[10px] text-muted-foreground">all-day</div>
-                            {allDayByDay.map((dayEvents, index) => (
-                                <div key={index} className="flex flex-col gap-1 border-l border-border p-1">
-                                    {dayEvents.map((event) => (
-                                        <button
-                                            key={event.id}
-                                            type="button"
-                                            onClick={() => setSelectedId(event.id)}
-                                            className={eventClassName(event, false)}
-                                        >
-                                            <span className="block truncate font-medium">
-                                                    {event.botSource === "rule" && <ZapIcon className="mr-0.5 inline size-3 align-[-1px] text-amber-300" />}
-                                                    {event.title}
-                                                </span>
-                                        </button>
-                                    ))}
-                                </div>
-                            ))}
-                        </div>
-                    )}
 
                     {/* Time grid */}
                     <div className="grid grid-cols-[56px_repeat(7,minmax(0,1fr))]">
@@ -205,7 +172,7 @@ export function WeekCalendar({
                                     className="absolute right-2 -translate-y-1/2 text-[10px] text-muted-foreground"
                                     style={{ top: index * HOUR_HEIGHT }}
                                 >
-                                    {index === 0 ? "" : formatTime(new Date(2000, 0, 1, hour)).replace(":00", "")}
+                                    {index === 0 ? "" : format_time(new Date(2000, 0, 1, hour)).replace(":00", "")}
                                 </span>
                             ))}
                         </div>
@@ -225,8 +192,8 @@ export function WeekCalendar({
                                         />
                                     ))}
 
-                                    {layoutDay(timedByDay[dayIndex]).map(({ event, start, end, lane, lanes }) => {
-                                        const dayEnd = addDays(day, 1);
+                                    {layoutDay(eventsByDay[dayIndex]).map(({ event, start, end, lane, lanes }) => {
+                                        const dayEnd = add_days(day, 1);
                                         const visibleEnd = end > dayEnd ? dayEnd : end;
                                         const top = minutesToPx((start.getTime() - gridStart.getTime()) / 60_000);
                                         const durationMinutes = Math.max(
@@ -249,12 +216,12 @@ export function WeekCalendar({
                                                 }}
                                             >
                                                 <span className="block truncate font-medium">
-                                                    {event.botSource === "rule" && <ZapIcon className="mr-0.5 inline size-3 align-[-1px] text-amber-300" />}
+                                                    {event.bot_source === "schedule_mode" && <ZapIcon className="mr-0.5 inline size-3 align-[-1px] text-amber-300" />}
                                                     {event.title}
                                                 </span>
                                                 {height >= 32 && (
                                                     <span className="block truncate opacity-80">
-                                                        {formatTime(start)} – {formatTime(end)}
+                                                        {format_time(start)} – {format_time(end)}
                                                     </span>
                                                 )}
                                             </button>
@@ -286,7 +253,7 @@ export function WeekCalendar({
                     onClose={() => setSelectedId(null)}
                     saveBotFn={saveBotFn}
                     removeBotFn={removeBotFn}
-                    resetToRulesFn={resetToRulesFn}
+                    followScheduleModeFn={followScheduleModeFn}
                 />
             )}
         </section>

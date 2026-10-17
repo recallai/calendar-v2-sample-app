@@ -1,8 +1,7 @@
 import { NextRequest } from "next/server";
-import { upsertCalendar } from "@/db/queries";
-import { connectCalendar } from "@/lib/recall";
-import { exchangeMicrosoftCode, getMicrosoftConfig, isMicrosoftConfigured } from "@/lib/oauth/microsoft";
-import { readCallback, redirectHome } from "@/lib/oauth/state";
+import { exchange_microsoft_code, get_microsoft_config, is_microsoft_configured } from "@/lib/oauth/microsoft";
+import { read_callback, redirect_home } from "@/lib/oauth/state";
+import { calendar_connect } from "@/lib/recall";
 
 /**
  * GET /api/auth/callback/microsoft
@@ -10,31 +9,30 @@ import { readCallback, redirectHome } from "@/lib/oauth/state";
  * then creates (or reconnects) the calendar in Recall.ai.
  */
 export async function GET(request: NextRequest) {
-    if (!isMicrosoftConfigured()) {
+    if (!is_microsoft_configured()) {
         return new Response("Microsoft OAuth is not configured", { status: 404 });
     }
-    const { clientId, clientSecret, redirectUri } = getMicrosoftConfig();
+    const { client_id, client_secret, redirect_uri } = get_microsoft_config();
 
-    const callback = readCallback("microsoft", request);
+    const callback = read_callback("microsoft", request);
     if ("error" in callback) {
         console.error(`Microsoft OAuth failed: ${callback.error}`, callback.description ?? "");
-        return redirectHome(redirectUri, { error: callback.error });
+        return redirect_home(redirect_uri, { error: callback.error });
     }
 
     try {
-        const { refreshToken, email } = await exchangeMicrosoftCode(callback.code);
-        const { calendar, reconnected } = await connectCalendar({
+        const { refresh_token, email } = await exchange_microsoft_code(callback.code);
+        const { calendar, reconnected } = await calendar_connect({
             platform: "microsoft_outlook",
             email,
-            clientId,
-            clientSecret,
-            refreshToken,
+            oauth_client_id: client_id,
+            oauth_client_secret: client_secret,
+            oauth_refresh_token: refresh_token,
         });
-        await upsertCalendar(calendar);
         console.log(`Microsoft calendar ${reconnected ? "reconnected" : "connected"}: calendar_id=${calendar.id}`);
-        return redirectHome(redirectUri, { connected: calendar.id });
+        return redirect_home(redirect_uri, { connected: calendar.id });
     } catch (error) {
         console.error("Microsoft OAuth callback failed:", error instanceof Error ? error.message : error);
-        return redirectHome(redirectUri, { error: "connect_failed" });
+        return redirect_home(redirect_uri, { error: "connect_failed" });
     }
 }

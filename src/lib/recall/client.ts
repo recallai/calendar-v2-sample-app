@@ -1,12 +1,9 @@
-import { getEnv } from "../env";
+import { z } from "zod";
+import { env } from "../env";
 
-
-type PaginatedResponse<T> = {
-    next: string | null;
-    previous: string | null;
-    results: T[];
-};
-
+/**
+ * Thrown when the Recall.ai API responds with an error, so callers can check the status.
+ */
 export class RecallApiError extends Error {
     constructor(
         readonly status: number,
@@ -28,66 +25,70 @@ const MAX_ATTEMPTS = 5;
  */
 const RETRYABLE_STATUSES = new Set([409, 429, 507]);
 
-function getBaseUrl(): string {
-    return `https://${getEnv().RECALL_REGION}.recall.ai`;
-}
-
 /**
  * Make an authenticated request to the Recall.ai API, retrying the statuses above with backoff.
+ * `path` is a path such as "/api/v2/calendars/", or a full URL such as a `next` page link.
  */
-export async function recallFetch<T>(pathOrUrl: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
-    const method = init.method ?? "GET";
-    const url = pathOrUrl.startsWith("http") ? pathOrUrl : `${getBaseUrl()}${pathOrUrl}`;
+export async function recall_fetch(args: {
+    path: string,
+    method?: "GET" | "POST" | "PATCH" | "DELETE",
+    query?: Record<string, string | boolean | undefined>,
+    body?: unknown,
+}): Promise<unknown> {
+    const { path, method = "GET", query = {}, body } = args;
 
-    for (let attempt = 1; ; attempt++) {
+    const url = new URL(path, `https://${env.RECALL_REGION}.recall.ai`);
+    for (const [key, value] of Object.entries(query)) {
+        if (value !== undefined) url.searchParams.set(key, String(value));
+    }
+
+    for (let attempt = 1;;attempt++) {
         const response = await fetch(url, {
             method,
             headers: {
-                Authorization: getEnv().RECALL_API_KEY,
-                Accept: "application/json",
-                ...(init.body !== undefined ? { "Content-Type": "application/json" } : {}),
+                "Authorization": env.RECALL_API_KEY,
+                "Content-Type": "application/json",
             },
-            body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
+            body: body !== undefined ? JSON.stringify(body) : undefined,
             cache: "no-store",
         });
 
         if (RETRYABLE_STATUSES.has(response.status) && attempt < MAX_ATTEMPTS) {
-            const retryAfterSeconds = Number(response.headers.get("Retry-After")) || 2 ** (attempt - 1);
-            await new Promise((resolve) => setTimeout(resolve, retryAfterSeconds * 1000));
+            const retry_after_seconds = Number(response.headers.get("Retry-After")) || 2 ** (attempt - 1);
+            console.log(`Recall API returned ${response.status}, retrying in ${retry_after_seconds} seconds`);
+            await new Promise((resolve) => setTimeout(resolve, retry_after_seconds * 1000));
             continue;
         }
-
         if (!response.ok) {
-            throw new RecallApiError(response.status, method, new URL(url).pathname, await response.text());
+            throw new RecallApiError(response.status, method, url.pathname, await response.text());
         }
 
-        if (response.status === 204) {
-            return undefined as T;
-        }
-        return (await response.json()) as T;
+        return response.status === 204 ? undefined : await response.json();
     }
 }
+
+/** One page of a list endpoint. */
+// eslint-disable-next-line @typescript-eslint/naming-convention
+const PageSchema = z.object({
+    next: z.string().nullable(),
+    results: z.unknown().array(),
+});
 
 /**
- * Follow `next` links until every page has been fetched.
- * The `next` URL is used as-is, without modifying its query parameters.
+ * Fetch every page of a list endpoint by following its `next` links.
  */
-export async function fetchAllPages<T>(path: string): Promise<T[]> {
-    const results: T[] = [];
-    let next: string | null = path;
-    while (next) {
-        const page: PaginatedResponse<T> = await recallFetch<PaginatedResponse<T>>(next);
+export async function recall_fetch_all_pages(args: {
+    path: string,
+    query?: Record<string, string | boolean | undefined>,
+}): Promise<unknown[]> {
+    const results: unknown[] = [];
+
+    let page = PageSchema.parse(await recall_fetch(args));
+    results.push(...page.results);
+    while (page.next) {
+        // The `next` link already holds the query, so it's used as is.
+        page = PageSchema.parse(await recall_fetch({ path: page.next }));
         results.push(...page.results);
-        next = page.next;
     }
     return results;
-}
-
-export function withQuery(path: string, query: Record<string, string | boolean | undefined>): string {
-    const params = new URLSearchParams();
-    for (const [key, value] of Object.entries(query)) {
-        if (value !== undefined) params.set(key, String(value));
-    }
-    const qs = params.toString();
-    return qs ? `${path}?${qs}` : path;
 }

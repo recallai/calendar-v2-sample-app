@@ -1,23 +1,23 @@
 "use client";
 
 import { ExternalLinkIcon, ZapIcon } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Separator } from "@/components/ui/separator";
-import type { UpcomingEvent } from "@/lib/recall";
+import { Badge } from "@/components/ui/Badge";
+import { buttonVariants } from "@/components/ui/Button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
+import { Separator } from "@/components/ui/Separator";
+import type { UpcomingEvent } from "@/lib/scheduling";
 import { BotControls, type BotActions } from "./BotControls";
-import { formatDay, formatTimeRange, getPlatformLabel } from "./calendar-format";
-import { UseCalendarRulesButton, type ResetToRulesFn } from "./UseCalendarRulesButton";
+import { format_day, format_time_range, get_platform_label } from "./calendar_format";
+import { FollowScheduleModeButton, type FollowScheduleModeFn } from "./FollowScheduleModeButton";
 
 const BOT_SOURCE_LABELS = {
-    rule: "Sent automatically by this calendar's setting",
+    schedule_mode: "Sent automatically by this calendar's setting",
     manual: "Added by hand",
 } as const;
 
 const OVERRIDE_LABELS = {
-    dispatch: "Always send a bot to this meeting",
-    skip: "Never send a bot to this meeting",
+    always: "Always send a bot to this meeting",
+    never: "Never send a bot to this meeting",
 } as const;
 
 /**
@@ -29,12 +29,12 @@ export function EventDialog({
     onClose,
     saveBotFn,
     removeBotFn,
-    resetToRulesFn,
+    followScheduleModeFn,
 }: {
     event: UpcomingEvent;
     now: Date;
     onClose: () => void;
-    resetToRulesFn: ResetToRulesFn;
+    followScheduleModeFn: FollowScheduleModeFn;
 } & BotActions) {
     const start = new Date(event.start_time);
     const end = new Date(event.end_time);
@@ -46,12 +46,11 @@ export function EventDialog({
                 <DialogHeader>
                     <DialogTitle className="pr-8">{event.title}</DialogTitle>
                     <DialogDescription>
-                        {formatDay(start)}
-                        {!event.isAllDay && ` · ${formatTimeRange(start, end)}`}
+                        {format_day(start)} · {format_time_range(start, end)}
                     </DialogDescription>
                     <div className="flex flex-wrap items-center gap-2 pt-1">
-                        {event.meeting_platform && <Badge variant="secondary">{getPlatformLabel(event.meeting_platform)}</Badge>}
-                        <Badge variant="outline">{event.calendarLabel}</Badge>
+                        {event.meeting_platform && <Badge variant="secondary">{get_platform_label(event.meeting_platform)}</Badge>}
+                        <Badge variant="outline">{event.calendar_label}</Badge>
                         {event.meeting_url && (
                             <a
                                 href={event.meeting_url}
@@ -68,18 +67,18 @@ export function EventDialog({
 
                 {/* Calendar V2: the app, not Recall, decides which meetings get a bot. */}
                 <div className="flex flex-col gap-2 rounded-lg border bg-muted/40 p-3">
-                    <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Dispatch decision</span>
-                    {event.botSource && (
+                    <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Bot decision</span>
+                    {event.bot_source && (
                         <span className="flex items-center gap-1.5 text-sm font-medium">
-                            {event.botSource === "rule" && <ZapIcon className="size-4 text-amber-500" />}
-                            {BOT_SOURCE_LABELS[event.botSource]}
+                            {event.bot_source === "schedule_mode" && <ZapIcon className="size-4 text-amber-500" />}
+                            {BOT_SOURCE_LABELS[event.bot_source]}
                         </span>
                     )}
-                    <span className="text-sm text-muted-foreground">{event.decisionReason}</span>
+                    <span className="text-sm text-muted-foreground">{event.decision_reason}</span>
                     {event.override && !hasStarted && (
                         <div className="flex flex-wrap items-center gap-2 text-xs">
                             <Badge variant="outline">{OVERRIDE_LABELS[event.override]}</Badge>
-                            <UseCalendarRulesButton eventId={event.id} resetToRulesFn={resetToRulesFn} />
+                            <FollowScheduleModeButton eventId={event.id} followScheduleModeFn={followScheduleModeFn} />
                         </div>
                     )}
                 </div>
@@ -96,8 +95,8 @@ export function EventDialog({
                         eventId={event.id}
                         hasMeetingUrl={!!event.meeting_url}
                         bot={event.bot}
-                        defaultSettings={event.calendarBotSettings}
-                        removeLabel={event.botSource === "rule" ? "Skip this meeting" : "Remove"}
+                        defaultSettings={event.calendar_bot_settings}
+                        removeLabel={event.bot_source === "schedule_mode" ? "Skip this meeting" : "Remove"}
                         saveBotFn={saveBotFn}
                         removeBotFn={removeBotFn}
                     />

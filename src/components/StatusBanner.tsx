@@ -1,5 +1,5 @@
 import { CircleAlertIcon } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/Alert";
 
 /**
  * Shows the ?error=<code> the OAuth callback passes back to the home page when connecting a calendar

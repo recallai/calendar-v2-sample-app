@@ -1,8 +1,7 @@
 "use client";
 
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import type { BotSettings } from "@/lib/bot-settings";
-import type { ScheduleMode } from "@/lib/schedule-modes";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/Dialog";
+import type { BotSettingsType, ScheduleModeType } from "@/schemas/CalendarSettingsSchema";
 import { BotSettingsForm } from "./BotSettingsForm";
 
 /**
@@ -26,13 +25,13 @@ export function BotSettingsDialog({
     onOpenChange: (open: boolean) => void;
     title: string;
     description: string;
-    initialSettings: BotSettings;
-    initialScheduleMode?: ScheduleMode;
+    initialSettings: BotSettingsType;
+    initialScheduleMode?: ScheduleModeType;
     requireChanges?: boolean;
     submitLabel: string;
     isPending: boolean;
     error?: string;
-    onSubmit: (settings: BotSettings, scheduleMode?: ScheduleMode) => void;
+    onSubmit: (settings: BotSettingsType, scheduleMode?: ScheduleModeType) => void;
 }) {
     return (
         <Dialog open={open} onOpenChange={(next) => !isPending && onOpenChange(next)}>

@@ -1,18 +1,19 @@
 "use client";
 
 import { useId, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { DialogFooter } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
-import { Textarea } from "@/components/ui/textarea";
-import type { BotSettings } from "@/lib/bot-settings";
-import { SCHEDULE_MODES, type ScheduleMode } from "@/lib/schedule-modes";
+import { Button } from "@/components/ui/Button";
+import { DialogFooter } from "@/components/ui/Dialog";
+import { Input } from "@/components/ui/Input";
+import { Label } from "@/components/ui/Label";
+import { Separator } from "@/components/ui/Separator";
+import { Textarea } from "@/components/ui/Textarea";
+import { SCHEDULE_MODES } from "@/lib/settings";
+import { format_seconds } from "@/lib/utils";
+import type { BotSettingsType, ScheduleModeType } from "@/schemas/CalendarSettingsSchema";
 import { OptionSelect, type Option } from "./OptionSelect";
 
-const SCHEDULE_MODE_OPTIONS: Option<ScheduleMode>[] = Object.entries(SCHEDULE_MODES).map(([value, { label }]) => ({
-    value: value as ScheduleMode,
+const SCHEDULE_MODE_OPTIONS: Option<ScheduleModeType>[] = Object.entries(SCHEDULE_MODES).map(([value, { label }]) => ({
+    value: value as ScheduleModeType,
     label,
 }));
 
@@ -21,20 +22,16 @@ const JOIN_EARLY_OPTIONS: Option<number>[] = [0, 1, 2, 5, 10].map((minutes) => (
     label: minutes === 0 ? "When the meeting starts" : `${minutes} min early`,
 }));
 
-function formatDuration(seconds: number): string {
-    return seconds < 60 ? `${seconds} sec` : `${seconds / 60} min`;
-}
-
 /** Seconds. Recall's defaults are 20 minutes for both: https://docs.recall.ai/docs/automatic-leaving-behavior */
 const WAITING_TIMEOUT_OPTIONS: Option<number>[] = [300, 600, 1200, 1800, 3600].map((seconds) => ({
     value: seconds,
-    label: formatDuration(seconds),
+    label: format_seconds(seconds),
 }));
 
 /** Seconds. Recall's default is 2 seconds, which can leave before people rejoin after a dropout. */
 const EVERYONE_LEFT_OPTIONS: Option<number>[] = [2, 30, 60, 300].map((seconds) => ({
     value: seconds,
-    label: formatDuration(seconds),
+    label: format_seconds(seconds),
 }));
 
 /**
@@ -54,24 +51,24 @@ export function BotSettingsForm({
     onSubmit,
     onCancel,
 }: {
-    initialSettings: BotSettings;
-    initialScheduleMode?: ScheduleMode;
+    initialSettings: BotSettingsType;
+    initialScheduleMode?: ScheduleModeType;
     requireChanges?: boolean;
     submitLabel: string;
     isPending: boolean;
     error?: string;
-    onSubmit: (settings: BotSettings, scheduleMode?: ScheduleMode) => void;
+    onSubmit: (settings: BotSettingsType, scheduleMode?: ScheduleModeType) => void;
     onCancel: () => void;
 }) {
     const id = useId();
     const [settings, setSettings] = useState(initialSettings);
     const [scheduleMode, setScheduleMode] = useState(initialScheduleMode);
-    const update = <K extends keyof BotSettings>(key: K, value: BotSettings[K]) =>
+    const update = <K extends keyof BotSettingsType>(key: K, value: BotSettingsType[K]) =>
         setSettings((current) => ({ ...current, [key]: value }));
 
     const hasChanges =
         scheduleMode !== initialScheduleMode ||
-        (Object.keys(initialSettings) as (keyof BotSettings)[]).some((key) => settings[key] !== initialSettings[key]);
+        (Object.keys(initialSettings) as (keyof BotSettingsType)[]).some((key) => settings[key] !== initialSettings[key]);
 
     return (
         <form

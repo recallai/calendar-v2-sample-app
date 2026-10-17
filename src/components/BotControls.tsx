@@ -2,16 +2,16 @@
 
 import { BotIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useState, useTransition } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import type { BotSettings } from "@/lib/bot-settings";
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import type { BotSettingsType } from "@/schemas/CalendarSettingsSchema";
 import { BotSettingsDialog } from "./BotSettingsDialog";
 
 /**
  * Add, edit or remove the bot for one meeting.
  */
 export type BotActions = {
-    saveBotFn: (eventId: string, settings: BotSettings) => Promise<{ error?: string }>;
+    saveBotFn: (eventId: string, settings: BotSettingsType) => Promise<{ error?: string }>;
     removeBotFn: (eventId: string) => Promise<{ error?: string }>;
 };
 
@@ -26,9 +26,9 @@ export function BotControls({
 }: {
     eventId: string;
     hasMeetingUrl: boolean;
-    bot: BotSettings | null;
+    bot: BotSettingsType | null;
     /** Where a new bot's settings start from: the meeting's calendar's bot settings. */
-    defaultSettings: BotSettings;
+    defaultSettings: BotSettingsType;
     /** e.g. "Skip this meeting" when removing would otherwise be undone by the calendar's setting. */
     removeLabel?: string;
 } & BotActions) {
@@ -47,7 +47,7 @@ export function BotControls({
         setIsEditing(true);
     };
 
-    const save = (settings: BotSettings) => {
+    const save = (settings: BotSettingsType) => {
         setFormError(undefined);
         startSaving(async () => {
             const result = await saveBotFn(eventId, settings);

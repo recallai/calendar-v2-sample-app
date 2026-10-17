@@ -1,27 +1,19 @@
 import { CalendarClockIcon } from "lucide-react";
-import { ActivityFeed } from "../components/ActivityFeed";
-import { Badge } from "@/components/ui/badge";
-import { CalendarList } from "../components/CalendarList";
-import { ConnectGoogleButton } from "../components/ConnectGoogleButton";
-import { ConnectMicrosoftButton } from "../components/ConnectMicrosoftButton";
-import { ConnectedToast } from "../components/ConnectedToast";
-import { StatusBanner } from "../components/StatusBanner";
-import { WeekCalendar } from "../components/WeekCalendar";
-
-import { listRecentBotDecisions, listRecentWebhookEvents, upsertCalendars } from "@/db/queries";
-import type { BotSettings } from "@/lib/bot-settings";
-import type { ScheduleMode } from "@/lib/schedule-modes";
-import { isGoogleConfigured } from "@/lib/oauth/google";
-import { isMicrosoftConfigured } from "@/lib/oauth/microsoft";
-import { getCalendarBotSettings, listCalendars, listUpcomingEvents } from "@/lib/recall";
-
-import {
-    removeBotFromEvent,
-    removeCalendar,
-    resetToCalendarSetting,
-    saveBotForEvent,
-    saveCalendarSettings,
-} from "./action";
+import { ActivityFeed } from "@/components/ActivityFeed";
+import { CalendarList } from "@/components/CalendarList";
+import { ConnectedToast } from "@/components/ConnectedToast";
+import { ConnectGoogleButton } from "@/components/ConnectGoogleButton";
+import { ConnectMicrosoftButton } from "@/components/ConnectMicrosoftButton";
+import { StatusBanner } from "@/components/StatusBanner";
+import { Badge } from "@/components/ui/Badge";
+import { WeekCalendar } from "@/components/WeekCalendar";
+import { bot_decisions_list } from "@/db/queries";
+import { is_google_configured } from "@/lib/oauth/google";
+import { is_microsoft_configured } from "@/lib/oauth/microsoft";
+import { calendars_list, get_calendar_label } from "@/lib/recall";
+import { load_scheduling_contexts, upcoming_events_list } from "@/lib/scheduling";
+import type { BotSettingsType, ScheduleModeType } from "@/schemas/CalendarSettingsSchema";
+import { follow_schedule_mode, remove_calendar, remove_meeting_bot_action, save_calendar_settings, save_meeting_bot } from "./action";
 
 export const dynamic = "force-dynamic";
 
@@ -31,27 +23,23 @@ export default async function HomePage({
     searchParams: Promise<{ connected?: string; error?: string }>;
 }) {
     const { connected, error } = await searchParams;
-    const calendars = await listCalendars();
+    const calendars = await calendars_list();
 
-    // Keep the local copies of Recall's calendars current, then load this app's state for them.
-    const calendarRows = await upsertCalendars(calendars);
-    const [upcomingEvents, webhookEvents, decisions] = await Promise.all([
-        listUpcomingEvents(calendars, 7),
-        listRecentWebhookEvents(20),
-        listRecentBotDecisions(30),
+    // Load this app's settings and overrides for each calendar.
+    const contexts = await load_scheduling_contexts({ calendars });
+    const [upcomingEvents, decisions] = await Promise.all([
+        upcoming_events_list({ contexts, days: 7 }),
+        bot_decisions_list({ limit: 30 }),
     ]);
 
-    const scheduleModeByCalendar: Record<string, ScheduleMode> = Object.fromEntries(
-        calendarRows.map((row) => [row.id, row.scheduleMode]),
+    const scheduleModeByCalendar: Record<string, ScheduleModeType> = Object.fromEntries(
+        [...contexts].map(([calendarId, { settings }]) => [calendarId, settings.scheduleMode]),
     );
-    const botSettingsByCalendar: Record<string, BotSettings> = Object.fromEntries(
-        calendarRows.map((row) => [row.id, getCalendarBotSettings(row)]),
-    );
-    const calendarLabels: Record<string, string> = Object.fromEntries(
-        calendars.map((calendar) => [calendar.id, calendar.platform_email ?? calendar.oauth_email ?? calendar.id]),
+    const botSettingsByCalendar: Record<string, BotSettingsType> = Object.fromEntries(
+        [...contexts].map(([calendarId, { settings }]) => [calendarId, settings.botSettings]),
     );
 
-    const canConnectCalendar = isGoogleConfigured() || isMicrosoftConfigured();
+    const canConnectCalendar = is_google_configured() || is_microsoft_configured();
 
     // ?connected=<id> comes from the OAuth callback. Ignore it if that calendar has since been deleted or
     // disconnected, so a stale link doesn't show a toast.
@@ -74,17 +62,17 @@ export default async function HomePage({
             {connectedCalendar && (
                 <ConnectedToast
                     calendarId={connectedCalendar.id}
-                    label={connectedCalendar.platform_email ?? connectedCalendar.oauth_email ?? connectedCalendar.id}
+                    label={get_calendar_label(connectedCalendar)}
                     isConnecting={connectedCalendar.status === "connecting"}
                 />
             )}
             <StatusBanner error={error} />
             <CalendarList
                 calendars={calendars}
-                removeCalendarFn={removeCalendar}
+                removeCalendarFn={remove_calendar}
                 scheduleModeByCalendar={scheduleModeByCalendar}
                 botSettingsByCalendar={botSettingsByCalendar}
-                saveCalendarSettingsFn={saveCalendarSettings}
+                saveCalendarSettingsFn={save_calendar_settings}
                 actions={
                     canConnectCalendar ? (
                         <div className="flex flex-wrap gap-2">
@@ -98,11 +86,11 @@ export default async function HomePage({
             />
             <WeekCalendar
                 events={upcomingEvents}
-                saveBotFn={saveBotForEvent}
-                removeBotFn={removeBotFromEvent}
-                resetToRulesFn={resetToCalendarSetting}
+                saveBotFn={save_meeting_bot}
+                removeBotFn={remove_meeting_bot_action}
+                followScheduleModeFn={follow_schedule_mode}
             />
-            <ActivityFeed webhookEvents={webhookEvents} decisions={decisions} calendarLabels={calendarLabels} />
+            <ActivityFeed decisions={decisions} />
         </main>
     );
 }

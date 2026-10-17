@@ -1,7 +1,7 @@
-import type { ReconcileSummary } from "@/lib/recall";
+import type { SyncSummary } from "@/lib/scheduling";
 
 /** What applying a calendar's setting changed, e.g. "Sent 3 bots, removed 1." */
-export function describeReconcileSummary(summary: ReconcileSummary): string {
+export function describe_sync_summary(summary: SyncSummary): string {
     const parts = [
         summary.scheduled > 0 && `sent ${summary.scheduled} bot${summary.scheduled === 1 ? "" : "s"}`,
         summary.removed > 0 && `removed ${summary.removed}`,

@@ -2,12 +2,18 @@
 
 import { Undo2Icon } from "lucide-react";
 import { useState, useTransition } from "react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/ui/Button";
 
-export type ResetToRulesFn = (eventId: string) => Promise<{ error?: string }>;
+export type FollowScheduleModeFn = (eventId: string) => Promise<{ error?: string }>;
 
-/** Drop a meeting's "always" / "never" choice so the calendar's schedule mode decides again. */
-export function UseCalendarRulesButton({ eventId, resetToRulesFn }: { eventId: string; resetToRulesFn: ResetToRulesFn }) {
+/** Drop a meeting's "always" / "never" override so the calendar's schedule mode decides again. */
+export function FollowScheduleModeButton({
+    eventId,
+    followScheduleModeFn,
+}: {
+    eventId: string;
+    followScheduleModeFn: FollowScheduleModeFn;
+}) {
     const [isPending, startTransition] = useTransition();
     const [error, setError] = useState<string>();
     return (
@@ -18,7 +24,7 @@ export function UseCalendarRulesButton({ eventId, resetToRulesFn }: { eventId: s
                 disabled={isPending}
                 onClick={() =>
                     startTransition(async () => {
-                        const result = await resetToRulesFn(eventId);
+                        const result = await followScheduleModeFn(eventId);
                         setError(result.error);
                     })
                 }

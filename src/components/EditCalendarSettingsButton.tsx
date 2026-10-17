@@ -3,17 +3,16 @@
 import { PencilIcon } from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import type { BotSettings } from "@/lib/bot-settings";
-import type { ReconcileSummary } from "@/lib/recall";
-import type { ScheduleMode } from "@/lib/schedule-modes";
+import { Button } from "@/components/ui/Button";
+import type { SyncSummary } from "@/lib/scheduling";
+import type { BotSettingsType, ScheduleModeType } from "@/schemas/CalendarSettingsSchema";
 import { BotSettingsDialog } from "./BotSettingsDialog";
-import { describeReconcileSummary } from "./reconcile-summary";
+import { describe_sync_summary } from "./sync_summary";
 
 export type SaveCalendarSettingsFn = (
     calendarId: string,
-    settings: { scheduleMode: ScheduleMode; botSettings: BotSettings },
-) => Promise<{ error?: string; summary?: ReconcileSummary }>;
+    settings: { scheduleMode: ScheduleModeType; botSettings: BotSettingsType },
+) => Promise<{ error?: string; summary?: SyncSummary }>;
 
 /**
  * Edits how a calendar schedules bots and what those bots are like, in a dialog. A changed schedule mode
@@ -27,15 +26,15 @@ export function EditCalendarSettingsButton({
     saveCalendarSettingsFn,
 }: {
     calendarId: string;
-    scheduleMode: ScheduleMode;
-    botSettings: BotSettings;
+    scheduleMode: ScheduleModeType;
+    botSettings: BotSettingsType;
     saveCalendarSettingsFn: SaveCalendarSettingsFn;
 }) {
     const [isEditing, setIsEditing] = useState(false);
     const [isSaving, startSaving] = useTransition();
     const [formError, setFormError] = useState<string>();
 
-    const save = (nextBotSettings: BotSettings, nextScheduleMode?: ScheduleMode) => {
+    const save = (nextBotSettings: BotSettingsType, nextScheduleMode?: ScheduleModeType) => {
         setFormError(undefined);
         startSaving(async () => {
             const response = await saveCalendarSettingsFn(calendarId, {
@@ -48,7 +47,7 @@ export function EditCalendarSettingsButton({
             }
             setIsEditing(false);
             toast.success("Calendar settings saved", {
-                description: response.summary ? describeReconcileSummary(response.summary) : undefined,
+                description: response.summary ? describe_sync_summary(response.summary) : undefined,
             });
         });
     };

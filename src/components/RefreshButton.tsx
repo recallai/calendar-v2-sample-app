@@ -3,7 +3,7 @@
 import { RefreshCwIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/ui/Button";
 
 export function RefreshButton({ label = "Refresh" }: { label?: string }) {
     const router = useRouter();

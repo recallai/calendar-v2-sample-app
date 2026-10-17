@@ -1,70 +1,12 @@
-import { fetchAllPages, recallFetch, withQuery } from "./client"
+import { z } from "zod";
+import { CalendarPlatformSchema, CalendarSchema, type CalendarType } from "../../schemas/CalendarArtifactSchema";
+import { CalendarEventSchema } from "../../schemas/CalendarEventArtifactSchema";
+import { RecallApiError, recall_fetch, recall_fetch_all_pages } from "./client";
 
 /**
- * Server-only helpers for the Recall.ai Calendar V2 API.
+ * The Recall.ai Calendar V2 API: calendars, their events, and scheduling bots for those events.
  * See: https://docs.recall.ai/docs/calendar-v2-integration-guide
  */
-
-export type CalendarPlatform = "google_calendar" | "microsoft_outlook";
-export type CalendarStatus = "connecting" | "connected" | "disconnected";
-
-export type Calendar = {
-    id: string;
-    metadata?: Record<string, unknown> | null;
-    oauth_client_id: string;
-    oauth_client_secret?: string | null;
-    oauth_refresh_token: string;
-    platform: CalendarPlatform;
-    webhook_url?: string;
-    oauth_email?: string;
-    platform_email: string | null;
-    status: CalendarStatus;
-    status_changes: Array<Record<string, unknown>>;
-    created_at: string;
-    updated_at: string;
-};
-
-export type CalendarEvent = {
-    id: string;
-    start_time: string;
-    end_time: string;
-    calendar_id: string;
-    /** Raw event from the provider (Google Calendar or Microsoft Graph event resource). */
-    raw: unknown;
-    platform: string;
-    platform_id: string;
-    ical_uid: string;
-    /** e.g. "zoom", "google_meet", or null when no meeting link was found. */
-    meeting_platform: string | null;
-    meeting_url: string | null;
-    created_at: string;
-    updated_at: string;
-    is_deleted: boolean;
-    /** Bots scheduled for this event. Can hold several entries if the same event is reused for later meetings. */
-    bots: CalendarEventBot[];
-};
-
-/**
- * A bot linked to a calendar event. `start_time` is the event's start time, not the bot's `join_at`.
- * https://docs.recall.ai/docs/scheduling-guide
- */
-export type CalendarEventBot = {
-    bot_id: string;
-    deduplication_key: string;
-    start_time: string;
-    meeting_url: string;
-};
-
-/**
- * Event title from the provider's raw data: `summary` for Google Calendar, `subject` for Outlook.
- * https://docs.recall.ai/docs/calendar-event-platform-data
- */
-export function getCalendarEventTitle(event: Pick<CalendarEvent, "raw">): string {
-    const raw = (event.raw ?? {}) as { summary?: unknown; subject?: unknown };
-    const title = typeof raw.summary === "string" ? raw.summary : typeof raw.subject === "string" ? raw.subject : "";
-    return title.trim() || "(No title)";
-}
-
 
 /* -------------------------------------------------------------------------- */
 /*                                  Calendars                                 */
@@ -72,69 +14,136 @@ export function getCalendarEventTitle(event: Pick<CalendarEvent, "raw">): string
 
 /**
  * Create a calendar from a user's OAuth refresh token. Represents the primary calendar of the authorizing account.
- * Calendars are not deduplicated by Recall, so check `listCalendars` for an existing one first.
+ * Calendars are not deduplicated by Recall, so check `calendars_list` for an existing one first.
  * https://docs.recall.ai/reference/calendars_create
  */
-export async function createCalendar(args: {
-    platform: CalendarPlatform;
-    oauth_client_id: string;
-    oauth_client_secret: string;
-    oauth_refresh_token: string;
-    oauth_email?: string;
-    webhook_url?: string;
-    metadata?: Record<string, unknown>;
-}): Promise<Calendar> {
-    return recallFetch<Calendar>("/api/v2/calendars/", { method: "POST", body: args });
+export async function calendar_create(args: {
+    platform: "google_calendar" | "microsoft_outlook",
+    oauth_client_id: string,
+    oauth_client_secret: string,
+    oauth_refresh_token: string,
+    oauth_email: string,
+}) {
+    const body = z.object({
+        platform: CalendarPlatformSchema,
+        oauth_client_id: z.string(),
+        oauth_client_secret: z.string(),
+        oauth_refresh_token: z.string(),
+        oauth_email: z.string(),
+    }).parse(args);
+
+    return CalendarSchema.parse(await recall_fetch({ path: "/api/v2/calendars/", method: "POST", body }));
 }
 
 /**
- * List all calendars in the workspace, following pagination.
+ * List the calendars in the workspace, following pagination.
  * https://docs.recall.ai/reference/calendars_list
  */
-export async function listCalendars(filters: {
-    email?: string;
-    platform?: CalendarPlatform;
-    status?: CalendarStatus;
-    created_at__gte?: string;
-} = {}): Promise<Calendar[]> {
-    return fetchAllPages<Calendar>(withQuery("/api/v2/calendars/", filters));
+export async function calendars_list(args: {
+    platform?: "google_calendar" | "microsoft_outlook",
+    email?: string,
+} = {}) {
+    const query = z.object({
+        platform: CalendarPlatformSchema.optional(),
+        email: z.string().optional(),
+    }).parse(args);
+
+    return CalendarSchema.array().parse(await recall_fetch_all_pages({ path: "/api/v2/calendars/", query }));
 }
 
 /**
+ * Retrieve a calendar from Recall.
  * https://docs.recall.ai/reference/calendars_retrieve
  */
-export async function getCalendar(calendarId: string): Promise<Calendar> {
-    return recallFetch<Calendar>(`/api/v2/calendars/${encodeURIComponent(calendarId)}/`);
+export async function calendar_retrieve(args: { calendar_id: string }) {
+    const { calendar_id } = z.object({ calendar_id: z.string() }).parse(args);
+
+    return CalendarSchema.parse(await recall_fetch({ path: `/api/v2/calendars/${calendar_id}/` }));
 }
 
 /**
- * Update a calendar, e.g. with a new refresh token after the user reconnects a disconnected calendar.
+ * Like calendar_retrieve, but returns null if the calendar was deleted. Recall still sends webhooks for a
+ * deleted calendar, but it can't be retrieved any more.
+ * https://docs.recall.ai/docs/calendar-v2-faq
+ */
+export async function calendar_find(args: { calendar_id: string }) {
+    try {
+        return await calendar_retrieve(args);
+    } catch (error) {
+        if (error instanceof RecallApiError && error.status === 404) return null;
+        throw error;
+    }
+}
+
+/**
+ * Update a calendar's OAuth credentials, e.g. with a new refresh token after the user reconnects it.
  * https://docs.recall.ai/reference/calendars_partial_update
  */
-export async function updateCalendar(
-    calendarId: string,
-    updates: Partial<{
-        platform: CalendarPlatform;
-        oauth_client_id: string;
-        oauth_client_secret: string;
-        oauth_refresh_token: string;
-        oauth_email: string;
-        webhook_url: string;
-        metadata: Record<string, unknown>;
-    }>,
-): Promise<Calendar> {
-    return recallFetch<Calendar>(`/api/v2/calendars/${encodeURIComponent(calendarId)}/`, {
-        method: "PATCH",
-        body: updates,
-    });
+export async function calendar_update(args: {
+    calendar_id: string,
+    oauth_client_id: string,
+    oauth_client_secret: string,
+    oauth_refresh_token: string,
+}) {
+    const { calendar_id, ...body } = z.object({
+        calendar_id: z.string(),
+        oauth_client_id: z.string(),
+        oauth_client_secret: z.string(),
+        oauth_refresh_token: z.string(),
+    }).parse(args);
+
+    return CalendarSchema.parse(await recall_fetch({ path: `/api/v2/calendars/${calendar_id}/`, method: "PATCH", body }));
 }
 
 /**
- * Delete (disconnect) a calendar. Recall does not send a calendar.update webhook for this.
+ * Delete a calendar. Recall unschedules its bots, and the calendar and its events can no longer be retrieved.
+ * Recall still sends a calendar.update webhook for it.
  * https://docs.recall.ai/reference/calendars_destroy
  */
-export async function deleteCalendar(calendarId: string): Promise<void> {
-    await recallFetch<void>(`/api/v2/calendars/${encodeURIComponent(calendarId)}/`, { method: "DELETE" });
+export async function calendar_delete(args: { calendar_id: string }) {
+    const { calendar_id } = z.object({ calendar_id: z.string() }).parse(args);
+
+    await recall_fetch({ path: `/api/v2/calendars/${calendar_id}/`, method: "DELETE" });
+}
+
+/**
+ * Create the calendar in Recall.ai, or update the refresh token on an existing calendar for the same account.
+ * Recall doesn't deduplicate calendars on creation, so this looks one up by platform and email first.
+ * See: https://docs.recall.ai/docs/calendar-v2-integration-guide
+ */
+export async function calendar_connect(args: {
+    platform: "google_calendar" | "microsoft_outlook",
+    email: string,
+    oauth_client_id: string,
+    oauth_client_secret: string,
+    oauth_refresh_token: string,
+}): Promise<{ calendar: CalendarType, reconnected: boolean }> {
+    const { platform, email, ...oauth } = args;
+
+    const [existing_calendar] = await calendars_list({ platform, email });
+    if (existing_calendar) {
+        const calendar = await calendar_update({ calendar_id: existing_calendar.id, ...oauth });
+        return { calendar, reconnected: true };
+    }
+
+    const calendar = await calendar_create({ platform, oauth_email: email, ...oauth });
+    return { calendar, reconnected: false };
+}
+
+/**
+ * The connected account's email. Recall says to use `platform_email`; it's briefly null right after the
+ * calendar is created, so this falls back to `oauth_email`.
+ * https://docs.recall.ai/docs/calendar-v2-faq
+ */
+export function get_calendar_email(calendar: CalendarType): string | null {
+    return calendar.platform_email ?? calendar.oauth_email ?? null;
+}
+
+/**
+ * A name to show for the calendar: its email, or its ID until the email is known.
+ */
+export function get_calendar_label(calendar: CalendarType): string {
+    return get_calendar_email(calendar) ?? calendar.id;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -142,88 +151,72 @@ export async function deleteCalendar(calendarId: string): Promise<void> {
 /* -------------------------------------------------------------------------- */
 
 /**
- * List all events for a calendar, following pagination.
+ * List a calendar's events, following pagination.
  * After a calendar.sync_events webhook, pass `updated_at__gte: last_updated_ts` to get only changed events.
  * https://docs.recall.ai/reference/calendar_events_list
  */
-export async function listCalendarEvents(filters: {
-    calendar_id: string;
-    updated_at__gte?: string;
-    start_time?: string;
-    start_time__gte?: string;
-    start_time__lte?: string;
-    is_deleted?: boolean;
-    ical_uid?: string;
-}): Promise<CalendarEvent[]> {
-    return fetchAllPages<CalendarEvent>(withQuery("/api/v2/calendar-events/", filters));
+export async function calendar_events_list(args: {
+    calendar_id: string,
+    updated_at__gte?: string,
+    start_time__gte?: string,
+    start_time__lte?: string,
+    is_deleted?: boolean,
+}) {
+    const query = z.object({
+        calendar_id: z.string(),
+        updated_at__gte: z.string().optional(),
+        start_time__gte: z.string().optional(),
+        start_time__lte: z.string().optional(),
+        is_deleted: z.boolean().optional(),
+    }).parse(args);
+
+    return CalendarEventSchema.array().parse(await recall_fetch_all_pages({ path: "/api/v2/calendar-events/", query }));
 }
 
-
 /**
+ * Retrieve a calendar event from Recall.
  * https://docs.recall.ai/reference/calendar_events_retrieve
  */
-export async function getCalendarEvent(calendarEventId: string): Promise<CalendarEvent> {
-    return recallFetch<CalendarEvent>(`/api/v2/calendar-events/${encodeURIComponent(calendarEventId)}/`);
+export async function calendar_event_retrieve(args: { calendar_event_id: string }) {
+    const { calendar_event_id } = z.object({ calendar_event_id: z.string() }).parse(args);
+
+    return CalendarEventSchema.parse(await recall_fetch({ path: `/api/v2/calendar-events/${calendar_event_id}/` }));
 }
 
 /**
- * Schedule (or reschedule) a bot for a calendar event. Calling again overrides the previously scheduled bot.
+ * Schedule (or reschedule) a bot for a calendar event. Calling again replaces the previously scheduled bot.
  * `meeting_url` and `join_at` are filled in from the event unless set in `bot_config`.
- * Use the same `deduplication_key` across events that should share a single bot.
+ * Events with the same `deduplication_key` share a single bot.
  * https://docs.recall.ai/reference/calendar_events_bot_create
  */
-export async function scheduleBotForCalendarEvent(
-    calendarEventId: string,
-    args: {
-        deduplication_key: string;
-        /** Any properties supported by Create Bot: https://docs.recall.ai/reference/bot_create */
-        bot_config: Record<string, unknown>;
-    },
-): Promise<CalendarEvent> {
-    return recallFetch<CalendarEvent>(`/api/v2/calendar-events/${encodeURIComponent(calendarEventId)}/bot/`, {
+export async function schedule_bot_for_calendar_event(args: {
+    calendar_event_id: string,
+    deduplication_key: string,
+    /** Any properties supported by Create Bot: https://docs.recall.ai/reference/bot_create */
+    bot_config: Record<string, unknown>,
+}) {
+    const { calendar_event_id, ...body } = z.object({
+        calendar_event_id: z.string(),
+        deduplication_key: z.string(),
+        bot_config: z.record(z.unknown()),
+    }).parse(args);
+
+    return CalendarEventSchema.parse(await recall_fetch({
+        path: `/api/v2/calendar-events/${calendar_event_id}/bot/`,
         method: "POST",
-        body: args,
-    });
+        body,
+    }));
 }
 
 /**
- * Remove the scheduled bot from a calendar event. Not needed when the event itself is deleted.
+ * Unschedule the bot for a calendar event. Not needed when the event itself is deleted.
  * https://docs.recall.ai/reference/calendar_events_bot_destroy
  */
-export async function deleteBotFromCalendarEvent(calendarEventId: string): Promise<CalendarEvent> {
-    return recallFetch<CalendarEvent>(`/api/v2/calendar-events/${encodeURIComponent(calendarEventId)}/bot/`, {
+export async function unschedule_bot_for_calendar_event(args: { calendar_event_id: string }) {
+    const { calendar_event_id } = z.object({ calendar_event_id: z.string() }).parse(args);
+
+    return CalendarEventSchema.parse(await recall_fetch({
+        path: `/api/v2/calendar-events/${calendar_event_id}/bot/`,
         method: "DELETE",
-    });
-}
-
-/**
- * Create the calendar in Recall.ai, or update the refresh token on an existing calendar for the same account.
- * Recall doesn't deduplicate calendars on creation, so this looks one up by platform + email first.
- * See: https://docs.recall.ai/docs/calendar-v2-integration-guide
- */
-export async function connectCalendar(args: {
-    platform: CalendarPlatform;
-    email: string;
-    clientId: string;
-    clientSecret: string;
-    refreshToken: string;
-}): Promise<{ calendar: Calendar; reconnected: boolean }> {
-    const [existing] = await listCalendars({ platform: args.platform, email: args.email });
-    if (existing) {
-        const calendar = await updateCalendar(existing.id, {
-            oauth_client_id: args.clientId,
-            oauth_client_secret: args.clientSecret,
-            oauth_refresh_token: args.refreshToken,
-        });
-        return { calendar, reconnected: true };
-    }
-
-    const calendar = await createCalendar({
-        platform: args.platform,
-        oauth_client_id: args.clientId,
-        oauth_client_secret: args.clientSecret,
-        oauth_refresh_token: args.refreshToken,
-        oauth_email: args.email,
-    });
-    return { calendar, reconnected: false };
+    }));
 }
