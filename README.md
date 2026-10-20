@@ -1,14 +1,38 @@
 # Calendar V2 Demo (Next.js)
 
-A Next.js demo app showing how to integrate [Recall.ai's Calendar V2 API](https://docs.recall.ai/docs/calendar-v2-integration-guide) to automatically schedule meeting bots for calendar events. Unlike [`calendar_v2`](../calendar_v2), which sends a bot to every meeting, this app decides which meetings get a bot per calendar, which is how Calendar V2's app-managed scheduling is meant to be used.
+A Next.js demo app showing how to integrate [Recall.ai's Calendar V2 API](https://docs.recall.ai/docs/calendar-v2-integration-guide) to automatically schedule meeting bots for calendar events. The app decides which meetings get a bot per calendar, which is how Calendar V2's app-managed scheduling is meant to be used.
+
+> **Done testing?** Delete your calendars before you stop running the app, or Recall keeps sending bots to your meetings. See [Disconnecting a Calendar](#disconnecting-a-calendar).
 
 ## Features
 
--   **Calendar Integration**: Connects directly with a user's Google Calendar or Microsoft Outlook accounts
+-   **Calendar Integration**: Connect as many Google Calendar and Microsoft Outlook accounts as you like, at the same time. Each account becomes its own Recall calendar; connecting the same account again reconnects it.
 -   **Calendar Sync**: Automatically syncs calendar events via Recall.ai webhooks
 -   **Schedule Modes**: Choose per calendar which meetings get a bot: every meeting, ones you organized, ones with external guests, ones with only internal guests, or none
 -   **Bot Settings**: Customize each calendar's bots (name, joining early, a chat message, and when the bot leaves on its own)
 -   **Per-Meeting Overrides**: Add, edit or remove the bot for a single meeting, whatever the calendar's setting
+
+## Bot Deduplication
+
+When several connected calendars have the same meeting (e.g. two teammates are both invited), each calendar has its own calendar event for it. The `deduplication_key` you pass when scheduling a bot decides how many bots join: events that share a key share one bot. Keys are scoped to your Recall workspace, so other apps using Recall don't affect yours.
+
+This app deduplicates at the meeting level, so one bot joins each meeting no matter how many connected calendars have it:
+
+```typescript
+deduplication_key = `${start_time}-${meeting_url}`;
+```
+
+Other common strategies:
+
+| Strategy | Key                                          | Result                                                   |
+| -------- | -------------------------------------------- | -------------------------------------------------------- |
+| Meeting  | `${start_time}-${meeting_url}`               | One bot per meeting (this app)                           |
+| User     | `${start_time}-${meeting_url}-${user_id}`    | One bot per user in the meeting, e.g. for private notes  |
+| Domain   | `${start_time}-${meeting_url}-${domain}`     | One bot per company in the meeting, e.g. per customer    |
+
+Pick one scheme and keep it: changing it later can leave events with bots under the old key. See `generate_bot_deduplication_key()` in `src/lib/recall/bot.ts`, and the [Scheduling Guide](https://docs.recall.ai/docs/scheduling-guide).
+
+Each bot also records who added it in its `scheduled_by` metadata (`schedule_mode` or `manual`), so changing a calendar's schedule mode never removes a bot the user added by hand.
 
 ## Architecture & Request Flows
 
@@ -142,12 +166,24 @@ When a user opens a meeting in the week calendar and adds, edits or removes its 
 -   **App-managed scheduling**: With Calendar V2, your app decides which meetings get a bot. This app does it with a schedule mode per calendar and per-meeting overrides.
 -   **Respond to webhooks quickly**: The webhook is acknowledged right away and the Recall.ai API calls happen after responding. Handling the same webhook twice is harmless: the second sync finds nothing to change.
 -   **Verified webhooks**: Every webhook is checked against `RECALL_WEBHOOK_SECRET` before it's processed. Unverified requests get a `401`.
--   **Deduplication keys**: Prevent duplicate bots when multiple users have the same meeting
+-   **Deduplication keys**: Prevent duplicate bots when multiple users have the same meeting (see [Bot Deduplication](#bot-deduplication))
+-   **Deleted events stay in the API**: An event removed from the calendar is still returned with `is_deleted: true`. Filter it out when showing events (`is_deleted=false` on List Calendar Events, as the week calendar does), and don't schedule bots for it. Recall unschedules a deleted event's bot itself.
 -   **Recall auto-manages some bots**: Recall unschedules bots when events are deleted or calendars are disconnected. It doesn't move a bot when its meeting moves, so the app schedules it again.
+
+## Calendar Sync Window
+
+Recall doesn't sync a calendar's whole history, which can be surprising when testing:
+
+-   **Future events**: synced up to **4 weeks** ahead. Meetings further out show up as that window moves forward.
+-   **Past events**: kept for **60 days**, then removed from the API.
+-   **First sync**: happens in the background after a calendar is connected, so its events (and `platform_email`) can take a moment to appear. The `calendar.sync_events` webhook tells you when events change.
+-   **Not synced**: all-day events (bots don't join them) and any calendar other than the account's primary calendar.
+
+See the [Calendar Integration FAQ](https://docs.recall.ai/docs/calendar-integration-faq).
 
 ## Prerequisites
 
--   Node.js 18+
+-   Node.js 20.9+ (required by Next.js 16)
 -   [ngrok](https://ngrok.com/) account (for webhooks)
 -   Recall.ai API key
 
@@ -165,7 +201,8 @@ OAuth redirects happen in the user's browser, so `localhost` redirect URIs work.
 ### 2. Install dependencies
 
 ```bash
-cd calendar_v2_next
+git clone https://github.com/recallai/calendar-v2-sample-app.git
+cd calendar-v2-sample-app
 npm install
 ```
 
@@ -210,8 +247,27 @@ This starts the app at http://localhost:3000. Database migrations run automatica
 3. Click the pencil on the calendar's card to choose which meetings get a bot, and what those bots are like
 4. Your meetings for the next 7 days show in the week calendar. Click one to add, edit or remove its bot
 5. A Recall.ai bot will join each meeting that has one at the scheduled time
+6. When you're done, delete your calendars (see below)
 
 To see every webhook Recall sent and whether it was delivered, open Webhooks in the Recall.ai dashboard.
+
+## Disconnecting a Calendar
+
+Scheduled bots live in Recall, not in this app. If you stop running the app without deleting your calendars, Recall keeps sending bots to your meetings.
+
+**In the app**: click the trash icon on the calendar's card. This calls `DELETE /api/v2/calendars/{id}`, which unschedules the calendar's upcoming bots and deletes its OAuth tokens.
+
+**Without the app**: list your calendars to find the ID, then delete it:
+
+```bash
+curl https://$RECALL_REGION.recall.ai/api/v2/calendars/ -H "Authorization: $RECALL_API_KEY"
+```
+
+```bash
+curl -X DELETE https://$RECALL_REGION.recall.ai/api/v2/calendars/CALENDAR_ID/ -H "Authorization: $RECALL_API_KEY"
+```
+
+A deleted calendar and its events can no longer be retrieved. This is different from a calendar becoming `disconnected` (e.g. the user revokes access in their Google account): Recall unschedules its bots too, but the calendar and its events stay in the API, and it can be reconnected. See the [Calendar V2 FAQ](https://docs.recall.ai/docs/calendar-v2-faq).
 
 ## Schedule Modes
 
@@ -250,7 +306,7 @@ The UI calls server actions in `src/app/action.ts` for everything else:
 ## Project Structure
 
 ```
-calendar_v2_next/
+calendar-v2-sample-app/
 ├── drizzle/                    # Database migrations (run when the server starts)
 ├── src/
 │   ├── app/
@@ -310,15 +366,3 @@ npm run db:generate   # after changing src/db/schema.ts
 npm run db:migrate    # apply migrations without starting the server
 npm run db:studio     # browse the database
 ```
-
-## Bot Deduplication
-
-The app uses meeting-level deduplication:
-
-```typescript
-deduplication_key = `${start_time}-${meeting_url}`;
-```
-
-This ensures only one bot joins per meeting, even if multiple connected calendars have the same event. See `generate_bot_deduplication_key()` in `src/lib/recall/bot.ts`, and the [`calendar_v2`](../calendar_v2) README for user-level and domain-level strategies.
-
-Each bot also records who added it in its `scheduled_by` metadata (`schedule_mode` or `manual`), so changing a calendar's schedule mode never removes a bot the user added by hand.
